@@ -202,7 +202,9 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
     var T = ${JSON.stringify({
       submitting: tr('form.submitting'), submit: tr('form.submit'),
       successTitle: tr('form.success.title'), successBody: tr('form.success.body'),
-      trackNow: tr('form.tracknow'), another: tr('form.another'), errGeneric: tr('err.generic')
+      trackNow: tr('form.tracknow'), another: tr('form.another'), errGeneric: tr('err.generic'),
+      offlineTitle: tr('form.offline.title'), offlineBody: tr('form.offline.body'),
+      offlinePending: tr('form.offline.pending'), refLabel: tr('form.ref')
     })};
     var fileInput = document.getElementById('imageInput');
     fileInput.addEventListener('change', function(){
@@ -218,6 +220,31 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
     var form = document.getElementById('reportForm');
     var btn = document.getElementById('submitBtn');
     var btnHtml = btn.innerHTML;
+    function showOfflineSuccess(pendingCode) {
+      document.getElementById('main').innerHTML =
+        '<section class="band"><div class="wrap"><div class="card success-panel">' +
+        '<span style="color:#b7791f;font-size:52px">&#9888;</span>' +
+        '<h2>' + T.offlineTitle + '</h2>' +
+        '<p class="muted">' + T.offlineBody + '</p>' +
+        '<div><span class="muted small">' + T.offlinePending + '</span><br>' +
+        '<div class="ref-chip">' + pendingCode + '</div></div>' +
+        '<div style="margin-top:10px"><span id="offlineBadge" class="offline-badge"></span></div>' +
+        '</div></div></section>';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    function queueOffline(data, done) {
+      var fields = {};
+      data.forEach(function (v, k) { if (k !== 'image' && typeof v === 'string') fields[k] = v; });
+      var item = { queuedAt: Date.now(), pendingCode: 'AFR-PEND-' + Math.random().toString(36).slice(2, 8).toUpperCase(), fields: fields, image: null };
+      var file = data.get('image');
+      var finish = function () { window.afriQueueAdd(item); done(item.pendingCode); };
+      if (file && file.size && file.size <= 1500000) {
+        var fr = new FileReader();
+        fr.onload = function () { item.image = { name: file.name || 'photo.jpg', dataUrl: fr.result }; finish(); };
+        fr.onerror = finish;
+        fr.readAsDataURL(file);
+      } else { finish(); }
+    }
     form.addEventListener('submit', function(ev){
       ev.preventDefault();
       var data = new FormData(form);
@@ -236,7 +263,14 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
           box.innerHTML = html || '<div class="notice notice-err">' + T.errGeneric + '</div>';
           box.scrollIntoView({ behavior: 'smooth', block: 'center' });
         })
-        .catch(function(){ btn.disabled = false; btn.innerHTML = btnHtml; toast(T.errGeneric, true); });
+        .catch(function(){
+          btn.disabled = false; btn.innerHTML = btnHtml;
+          if (typeof window.afriQueueAdd === 'function') {
+            queueOffline(data, function (pendingCode) { showOfflineSuccess(pendingCode); });
+          } else {
+            toast(T.errGeneric, true);
+          }
+        });
     });
     function showSuccess(refNo) {
       document.getElementById('main').innerHTML =

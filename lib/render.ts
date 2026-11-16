@@ -105,8 +105,9 @@ export function pageShell(opts: {
 <meta name="description" content="AFRIPULSE AI \u2014 Africa's Living Intelligence & Innovation Network. ${t(lang, 'brand.tagline')}"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/assets/app.css?v=2"/>
-<script src="/assets/app.js?v=2"></script>
+<link rel="stylesheet" href="/assets/app.css?v=3"/>
+<script src="/assets/app.js?v=3"></script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js?v=1').catch(function(){});});}</script>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(logoSvg(64).replace('width="64" height="64"', ''))}"/>
 ${extraHead}
 </head>

@@ -294,10 +294,10 @@ async function setLang(req: http.IncomingMessage, res: http.ServerResponse, para
   res.end();
 }
 
-function serveAsset(res: http.ServerResponse, file: string, mime: string): void {
+function serveAsset(res: http.ServerResponse, file: string, mime: string, cacheControl = 'no-cache'): void {
   const p = normalize(join(__dirname, 'public', file));
   if (!p.startsWith(join(__dirname, 'public')) || !existsSync(p)) { res.writeHead(404); res.end('Not found'); return; }
-  res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-cache' });
+  res.writeHead(200, { 'content-type': mime, 'cache-control': cacheControl });
   res.end(readFileSync(p));
 }
 
@@ -1191,6 +1191,9 @@ const routes: Route[] = [
       if (f === 'app.css') serveAsset(res, 'app.css', 'text/css; charset=utf-8');
       else if (f === 'app.js') serveAsset(res, 'app.js', 'text/javascript; charset=utf-8');
       else { res.writeHead(404); res.end('Not found'); }
+    } },
+  { method: 'GET', path: '/sw.js', handler: (_q, res) => {
+      serveAsset(res, 'sw.js', 'text/javascript; charset=utf-8', 'no-store');
     } },
 
   { method: 'GET', path: '/admin/login', handler: adminLoginPage },
