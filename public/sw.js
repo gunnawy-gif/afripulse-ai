@@ -5,14 +5,16 @@
 //  - /api/*: network only, never cached
 // Bump CACHE each time precached asset URLs change so old caches clear.
 
-var CACHE = 'afripulse-v1';
+var CACHE = 'afripulse-v2';
 var PRECACHE = [
   '/',
   '/report',
   '/track',
   '/about',
   '/assets/app.css?v=3',
-  '/assets/app.js?v=3'
+  '/assets/app.js?v=3',
+  '/assets/icon.svg',
+  '/manifest.json'
 ];
 
 self.addEventListener('install', function (ev) {

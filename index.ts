@@ -1190,10 +1190,16 @@ const routes: Route[] = [
       const f = p.file;
       if (f === 'app.css') serveAsset(res, 'app.css', 'text/css; charset=utf-8');
       else if (f === 'app.js') serveAsset(res, 'app.js', 'text/javascript; charset=utf-8');
+      else if (f === 'icon.svg') serveAsset(res, 'icon.svg', 'image/svg+xml');
+      else if (f === 'icon-192.png') serveAsset(res, 'icon-192.png', 'image/png');
+      else if (f === 'icon-512.png') serveAsset(res, 'icon-512.png', 'image/png');
       else { res.writeHead(404); res.end('Not found'); }
     } },
   { method: 'GET', path: '/sw.js', handler: (_q, res) => {
       serveAsset(res, 'sw.js', 'text/javascript; charset=utf-8', 'no-store');
+    } },
+  { method: 'GET', path: '/manifest.json', handler: (_q, res) => {
+      serveAsset(res, 'manifest.json', 'application/manifest+json');
     } },
 
   { method: 'GET', path: '/admin/login', handler: adminLoginPage },

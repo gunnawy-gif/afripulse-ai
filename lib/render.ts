@@ -107,6 +107,9 @@ export function pageShell(opts: {
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/assets/app.css?v=3"/>
 <script src="/assets/app.js?v=3"></script>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#0B3D2E"/>
+<link rel="apple-touch-icon" href="/assets/icon-192.png?v=2"/>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js?v=1').catch(function(){});});}</script>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(logoSvg(64).replace('width="64" height="64"', ''))}"/>
 ${extraHead}
