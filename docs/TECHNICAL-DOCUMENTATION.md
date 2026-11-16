@@ -95,8 +95,25 @@ Kagara Gari, Kakuri, Kongoma Central, Kongoma West, Kusherki North, Kusherki Sou
 - CSV export ✓ · PDF export (14 KB valid PDF) ✓
 - Mobile responsive layout (390px viewport verified) ✓
 - Audit log recording all admin actions ✓
+- Offline mode (added 2026-11-16) ✓:
+  - Service worker caches the shell — /, /report, /track, /about open with no network ✓
+  - Offline banner appears when the device loses connectivity (EN + HA) ✓
+  - Submitting the report form while offline saves it on-device with a pending code (`AFR-PEND-XXXXXX`) and shows "Saved on your phone" ✓
+  - On network return the queued report is sent automatically and a real reference is issued (`AFR-2026-00017`, `AFR-2026-00018` in tests) ✓
+  - A report the server rejects (e.g. invalid fields) is dropped with a clear message instead of retrying forever ✓
 
 ## 10. Deployment
+
+**Offline support (added 2026-11-16):** the app is offline-first for citizens.
+`public/sw.js` (service worker) caches the app shell so public pages open with
+no connectivity; the report form queues submissions in the device's
+localStorage (`afri_offline_queue`, fields + photo up to 1.5 MB) and replays
+them automatically when connectivity returns, issuing real reference numbers.
+Server-rejected reports are dropped with a clear message instead of retrying
+forever. All offline strings are bilingual (EN/HA) in `lib/i18n.ts`
+(`form.offline.*`, `offline.*`). Note: SMS submission for areas with no
+data connection at all would require a paid SMS provider account — not yet
+built.
 
 **Current:** the app runs on this Skydive agent's always-on webserver (`webserver/index.ts`), persisted in the agent's git repo, with the database attached via the `DATABASE_URL` secret. Public at the URL above; it survives restarts (wake-on-traffic cold starts take a few seconds).
 
