@@ -1,0 +1,19 @@
+{
+  "name": "afripulse-ai",
+  "version": "1.0.0",
+  "description": "Africa's Living Intelligence & Innovation Network — bilingual (EN/HA) community reporting platform",
+  "type": "module",
+  "main": "index.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types index.ts"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "busboy": "^1.6.0"
+  },
+  "license": "MIT",
+  "author": "Usman Musa (Al-Gunnawy)"
+}
