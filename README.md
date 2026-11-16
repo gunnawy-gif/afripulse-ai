@@ -31,3 +31,21 @@ Usman Musa (Al-Gunnawy)
 Planning and MVP Development.
 
 *The features listed above are planned and are not yet implemented.*
+
+---
+
+## Repository Structure
+
+- `index.ts` — webserver entry point (all routes)
+- `landing.ts` — public landing pages
+- `lib/` — db, auth, i18n, AI, rendering, validation helpers
+- `public/` — static assets (CSS/JS)
+- `schema.sql` — database schema
+- `seed.ts` — demo data seeder (clearly marked demo data)
+
+## Running
+
+The app runs on Skydive at https://blanket-at-usman-s-works-ezen0.skydive.app/
+Public pages: `/`, `/about`, `/report`, `/track`, `/map`, `/admin`, `/health`.
+
+Environment: `DATABASE_URL` (Postgres), `WEBSERVER_PORT`.
