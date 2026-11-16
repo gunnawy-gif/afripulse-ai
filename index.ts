@@ -1859,6 +1859,14 @@ async function apiWards(req: http.IncomingMessage, res: http.ServerResponse): Pr
   json(res, 200, { wards: rows.map((r) => r.name) });
 }
 
+// Admin-scoped ward listing (auth required); the public one is /api/wards/:lga
+async function apiAdminWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const admin = await requireAdmin(req, res, 'view');
+  if (!admin) return;
+  const rows = await many<{ lga: string; name: string }>("SELECT lga, name FROM wards WHERE state = 'Niger' ORDER BY lga, name");
+  json(res, 200, { wards: rows });
+}
+
 // ---------- route table ----------
 const routes: Route[] = [
   { method: 'GET', path: '/health', handler: (_q, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok'); } },
@@ -1942,7 +1950,7 @@ const routes: Route[] = [
   { method: 'POST', path: '/api/admin/reports/:id/comment', handler: apiAdminComment },
   { method: 'POST', path: '/api/admin/reports/:id/reanalyze', handler: apiAdminReanalyze },
   { method: 'GET', path: '/api/wards/:lga', handler: apiWards },
-  { method: 'GET', path: '/api/admin/wards', handler: apiWards },
+  { method: 'GET', path: '/api/admin/wards', handler: apiAdminWards },
   { method: 'POST', path: '/api/admin/intelligence/generate', handler: apiGenerateIntelligence },
   { method: 'GET', path: '/api/admin/intelligence/:id', handler: apiGetIntelligence },
   { method: 'GET', path: '/api/admin/export.csv', handler: apiExportCsv },
