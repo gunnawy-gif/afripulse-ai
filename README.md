@@ -1,5 +1,9 @@
 # AFRIPULSE AI 🌍
 
+![License](https://img.shields.io/badge/license-MIT-green) ![Release](https://img.shields.io/badge/release-v1.0-blue) ![Node](https://img.shields.io/badge/node-%E2%89%A524-brightgreen)
+
+> **Live demo:** https://blanket-at-usman-s-works-ezen0.skydive.app/ · [Project page](https://gunnawy-gif.github.io/afripulse-ai/)
+
 ### Africa's Living Intelligence & Innovation Network
 
 AFRIPULSE AI is an innovative project aimed at using Artificial Intelligence to identify, analyze, and help address community challenges across Africa.
