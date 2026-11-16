@@ -20,6 +20,7 @@ import { pageShell, statusBadge, priorityBadge } from './lib/render.ts';
 import { homePage, aboutPage, reportPage, trackPage, mapPage } from './lib/pages.ts';
 import { registerPage, publicLoginPage, accountPage, isStaffRole } from './lib/account.ts';
 import { civicPage, developmentPage } from './lib/civic.ts';
+import { hubPage } from './lib/hub.ts';
 import { loginPage, adminHtml } from './lib/adminpages.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -357,6 +358,84 @@ async function apiAdminProjects(req: http.IncomingMessage, res: http.ServerRespo
   }
 }
 
+// ---------- Phase 5: African Innovation Hub ----------
+async function hubPageHandler(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const innovations = await many<{ id: number; name: string; summary: string; category: string; founder: string | null; ward: string | null }>(
+    "SELECT id, name, summary, category, founder, ward FROM innovations WHERE status = 'published' ORDER BY created_at DESC LIMIT 30"
+  );
+  const opportunities = await many<{ id: number; title: string; description: string; kind: string; provider: string | null; deadline: string | null; link: string | null }>(
+    "SELECT id, title, description, kind, provider, deadline::text, link FROM opportunities WHERE status = 'published' ORDER BY (deadline IS NULL), deadline LIMIT 30"
+  );
+  hubPage(req, res, { innovations, opportunities });
+}
+
+async function apiHubSubmit(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const ip = clientIp(req);
+  if (rateLimited('hub:' + ip, 5, 60 * 60 * 1000)) { json(res, 429, { error: 'Too many submissions. Please try again later.' }); return; }
+  const body = await readJson(req);
+  const errors = validate(body, {
+    name: { required: true, min: 3, max: 150, label: 'Innovation name' },
+    summary: { required: true, min: 20, max: 3000, label: 'Summary' },
+    category: { required: true, oneOf: ['technology', 'agriculture', 'health', 'education', 'energy', 'other'], label: 'Category' },
+  });
+  if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
+  const user = await userFromRequest(req);
+  await sql.query(
+    "INSERT INTO innovations (name, summary, category, founder, ward, submitted_by) VALUES ($1,$2,$3,$4,$5,$6)",
+    [sanitizeText(body.name, 150), sanitizeText(body.summary, 3000), String(body.category), body.founder ? sanitizeText(body.founder, 80) : null, body.ward ? sanitizeText(body.ward, 60) : null, user ? user.id : null]
+  );
+  json(res, 201, { ok: true });
+}
+
+async function apiAdminHub(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await requireAdmin(req, res, 'administer');
+  if (!user) return;
+  await ensureSchema();
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const id = Number(url.pathname.match(/\/(\d+)$/)?.[1]);
+  if (req.method === 'GET') {
+    const innovations = await many<Record<string, unknown>>('SELECT id, name, summary, category, founder, ward, status FROM innovations ORDER BY (status = \'pending\') DESC, created_at DESC LIMIT 100');
+    const opportunities = await many<Record<string, unknown>>('SELECT id, title, description, kind, provider, deadline::text, link, status FROM opportunities ORDER BY (status = \'pending\') DESC, created_at DESC LIMIT 100');
+    json(res, 200, { innovations, opportunities });
+    return;
+  }
+  if (req.method === 'POST') {
+    // admin-created opportunity (already trusted, published directly)
+    const body = await readJson(req);
+    const errors = validate(body, {
+      title: { required: true, min: 5, max: 200, label: 'Title' },
+      description: { required: true, min: 20, max: 5000, label: 'Description' },
+      kind: { required: true, oneOf: ['grant', 'funding', 'training', 'competition', 'resource'], label: 'Kind' },
+    });
+    if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
+    const deadline = body.deadline ? String(body.deadline).slice(0, 10) : null;
+    const link = body.link ? sanitizeText(body.link, 300) : null;
+    if (link && !/^https?:\/\//.test(link)) { json(res, 400, { error: 'Link must start with http:// or https://' }); return; }
+    const opp = await one<{ id: number }>(
+      "INSERT INTO opportunities (title, description, kind, provider, deadline, link, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,'published',$7) RETURNING id",
+      [sanitizeText(body.title, 200), sanitizeText(body.description, 5000), String(body.kind), body.provider ? sanitizeText(body.provider, 120) : null, deadline, link, user.id]
+    );
+    await audit(user, 'opportunity.create', 'opportunity', String(opp!.id), null, clientIp(req));
+    json(res, 201, { ok: true, id: opp!.id });
+    return;
+  }
+  if (req.method === 'PATCH') {
+    const body = await readJson(req);
+    const status = String(body.status ?? '');
+    if (!['published', 'hidden', 'expired'].includes(status)) { json(res, 400, { error: 'Invalid status' }); return; }
+    if (url.pathname.includes('/innovations/')) {
+      await sql.query('UPDATE innovations SET status = $1 WHERE id = $2', [status, id]);
+      await audit(user, 'innovation.' + status, 'innovation', String(id), null, clientIp(req));
+    } else {
+      await sql.query('UPDATE opportunities SET status = $1 WHERE id = $2', [status, id]);
+      await audit(user, 'opportunity.' + status, 'opportunity', String(id), null, clientIp(req));
+    }
+    json(res, 200, { ok: true });
+  }
+}
+
 // ---------- APIs ----------
 async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const ip = clientIp(req);
@@ -665,7 +744,9 @@ async function apiLogout(req: http.IncomingMessage, res: http.ServerResponse): P
   res.end(JSON.stringify({ ok: true }));
 }
 
-async function apiStats(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function apiStats(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const admin = await requireAdmin(req, res, 'view');
+  if (!admin) return;
   const totals = await one<Record<string, string>>(
     `SELECT count(*)::text total,
        count(*) FILTER (WHERE status='submitted')::text submitted,
@@ -981,6 +1062,30 @@ async function apiGenerateIntelligence(req: http.IncomingMessage, res: http.Serv
     byWard: byWard.map((r) => ({ ward: r.k, count: Number(r.c), critical: Number(r.crit) })),
     topIssues: top.map((r) => ({ refNo: String(r.ref_no), title: String(r.title), ward: (r.ward as string) ?? null, category: CAT_LABEL[String(r.category)]?.[0] ?? String(r.category), priority: PR_LABEL[String(r.priority)]?.[0] ?? String(r.priority) })),
   };
+
+  // Civic engagement signals (Phase 4): combine community voice with report data
+  const civicPolls = await one<{ active: string; votes: string }>(
+    `SELECT count(*) FILTER (WHERE active)::text active, (SELECT count(*) FROM poll_votes)::text votes FROM polls`
+  );
+  const civicPets = await many<{ t_en: string; sigs: number; target: number }>(
+    `SELECT p.title_en t_en, count(s.id)::int sigs, p.signature_target target FROM petitions p
+     LEFT JOIN petition_signatures s ON s.petition_id = p.id WHERE p.status = 'open'
+     GROUP BY p.id ORDER BY p.created_at DESC LIMIT 5`
+  );
+  const civicFb = await one<{ pending: string }>("SELECT count(*)::text pending FROM feedback WHERE status = 'pending'");
+  const topPoll = await one<{ q: string; v: string }>(
+    `SELECT p.question_en q, (SELECT count(*) FROM poll_votes v WHERE v.poll_id = p.id)::text v
+     FROM polls p WHERE p.active = TRUE ORDER BY p.created_at DESC LIMIT 1`
+  );
+  if (civicPolls || civicPets.length || civicFb) {
+    stats.civic = {
+      activePolls: Number(civicPolls?.active ?? 0),
+      totalVotes: Number(civicPolls?.votes ?? 0),
+      openPetitions: civicPets.map((p) => ({ title: p.t_en, signatures: p.sigs, target: p.target })),
+      feedbackPending: Number(civicFb?.pending ?? 0),
+      topPollQuestion: topPoll && Number(topPoll.v) > 0 ? topPoll.q : null,
+    };
+  }
 
   try {
     let contentMd: string; let title: string; let theme: string | null = null;
@@ -1440,6 +1545,69 @@ async function adminAuditPage(req: http.IncomingMessage, res: http.ServerRespons
   res.end(html);
 }
 
+async function adminHubPage(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await userFromRequest(req);
+  if (!user || !(user.role === 'super_admin' || user.role === 'lga_admin')) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
+  const content = `
+  <div class="dash-grid" style="grid-template-columns: 1fr 1fr">
+    <div class="card">
+      <h3>Innovation submissions (review queue)</h3>
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>Name</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody id="i-rows"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Add an opportunity</h3>
+      <div class="stack" style="max-width:none">
+        <input id="o-title" type="text" placeholder="Title"/>
+        <textarea id="o-desc" rows="2" placeholder="Description (who it is for, what it offers)"></textarea>
+        <div style="display:flex;gap:10px">
+          <select id="o-kind" style="flex:1"><option value="grant">Grant</option><option value="funding">Funding</option><option value="training">Training</option><option value="competition">Competition</option><option value="resource">Resource</option></select>
+          <input id="o-deadline" type="date" style="width:160px"/>
+        </div>
+        <input id="o-provider" type="text" placeholder="Provider (optional)"/>
+        <input id="o-link" type="url" placeholder="Link (optional, https://...)"/>
+        <button class="btn btn-primary btn-sm" id="o-add">Publish opportunity</button>
+        <div id="o-msg"></div>
+      </div>
+      <div class="tablewrap" style="margin-top:14px"><table class="tbl"><thead><tr><th>Title</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody id="op-rows"></tbody></table></div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    var E = function(id){ return document.getElementById(id); };
+    function load(){
+      getJson('/api/admin/hub').then(function(r){
+        E('i-rows').innerHTML = (r.data.innovations||[]).map(function(i){
+          return '<tr><td><b>' + i.name + '</b><br><span class="muted small">' + (i.summary||'').slice(0,70) + '</span></td><td>' + i.category + '</td><td>' + i.status + '</td>' +
+            '<td>' + (i.status !== 'published' ? '<button class="btn btn-ghost btn-sm i-set" data-id="' + i.id + '" data-status="published">Publish</button> ' : '') +
+            (i.status !== 'hidden' ? '<button class="btn btn-ghost btn-sm i-set" data-id="' + i.id + '" data-status="hidden">Hide</button>' : '') + '</td></tr>';
+        }).join('') || '<tr><td colspan=4 class="muted">No submissions yet.</td></tr>';
+        Array.prototype.forEach.call(document.querySelectorAll('.i-set'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/hub/innovations/' + b.dataset.id, { status: b.dataset.status }).then(load); };
+        });
+        E('op-rows').innerHTML = (r.data.opportunities||[]).map(function(o){
+          return '<tr><td>' + o.title + '</td><td>' + o.kind + '</td><td>' + o.status + '</td>' +
+            '<td>' + (o.status === 'published' ? '<button class="btn btn-ghost btn-sm o-set" data-id="' + o.id + '" data-status="expired">Mark expired</button>' : '') + '</td></tr>';
+        }).join('') || '<tr><td colspan=4 class="muted">None yet.</td></tr>';
+        Array.prototype.forEach.call(document.querySelectorAll('.o-set'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/hub/opportunities/' + b.dataset.id, { status: b.dataset.status }).then(load); };
+        });
+      });
+    }
+    E('o-add').onclick = function(){
+      postJson('/api/admin/hub', { title: E('o-title').value, description: E('o-desc').value, kind: E('o-kind').value, deadline: E('o-deadline').value || null, provider: E('o-provider').value || null, link: E('o-link').value || null }).then(function(r){
+        if (r.ok) { E('o-title').value = E('o-desc').value = E('o-provider').value = E('o-link').value = ''; E('o-msg').innerHTML = '<div class="notice notice-ok">Published.</div>'; }
+        else E('o-msg').innerHTML = '<div class="notice notice-err">' + ((r.data && (r.data.error || JSON.stringify(r.data.fields))) || 'Failed') + '</div>';
+        load();
+      });
+    };
+    load();
+  })();
+  <\/script>`;
+  const html = adminHtml(user, 'hub', 'Innovation Hub', content);
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(html);
+}
+
 async function adminCivicPage(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const user = await userFromRequest(req);
   if (!user || !(user.role === 'super_admin' || user.role === 'lga_admin')) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
@@ -1673,7 +1841,9 @@ async function apiGetIntelligence(req: http.IncomingMessage, res: http.ServerRes
   json(res, 200, ir);
 }
 
-async function apiWards(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function apiWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const admin = await requireAdmin(req, res, 'view');
+  if (!admin) return;
   const rows = await many<{ name: string }>("SELECT name FROM wards WHERE lga = 'Rafi' ORDER BY name");
   json(res, 200, { wards: rows.map((r) => r.name) });
 }
@@ -1712,6 +1882,13 @@ const routes: Route[] = [
   { method: 'PATCH', path: '/api/admin/projects/:id', handler: apiAdminProjects },
   { method: 'POST', path: '/api/admin/projects/:id/updates', handler: apiAdminProjects },
   { method: 'GET', path: '/admin/civic', handler: adminCivicPage },
+  { method: 'GET', path: '/hub', handler: hubPageHandler },
+  { method: 'POST', path: '/api/hub/submit', handler: apiHubSubmit },
+  { method: 'GET', path: '/api/admin/hub', handler: apiAdminHub },
+  { method: 'POST', path: '/api/admin/hub', handler: apiAdminHub },
+  { method: 'PATCH', path: '/api/admin/hub/innovations/:id', handler: apiAdminHub },
+  { method: 'PATCH', path: '/api/admin/hub/opportunities/:id', handler: apiAdminHub },
+  { method: 'GET', path: '/admin/hub', handler: adminHubPage },
   { method: 'GET', path: '/report', handler: reportPage },
   { method: 'GET', path: '/track', handler: trackPage },
   { method: 'GET', path: '/map', handler: mapPage },

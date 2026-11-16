@@ -200,3 +200,28 @@ CREATE TABLE IF NOT EXISTS project_updates (
   note TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 2026-11-16 Phase 5: African Innovation Hub
+CREATE TABLE IF NOT EXISTS innovations (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  category TEXT NOT NULL,
+  founder TEXT,
+  ward TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','published','hidden')),
+  submitted_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS opportunities (
+  id SERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('grant','funding','training','competition','resource')),
+  provider TEXT,
+  deadline DATE,
+  link TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','published','hidden','expired')),
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

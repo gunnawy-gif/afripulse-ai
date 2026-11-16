@@ -104,6 +104,13 @@ export type IntelligenceStats = {
   byWard: { ward: string; count: number; critical: number }[];
   topIssues: { title: string; ward: string | null; category: string; priority: string; refNo: string }[];
   resolvedThisPeriod: number;
+  civic?: {
+    activePolls: number;
+    totalVotes: number;
+    openPetitions: { title: string; signatures: number; target: number }[];
+    feedbackPending: number;
+    topPollQuestion: string | null;
+  };
 };
 
 const INTELLIGENCE_SYSTEM = `You are the intelligence analyst for AFRIPULSE AI, a community reporting platform piloted in Rafi LGA, Niger State, Nigeria.

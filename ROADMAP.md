@@ -54,17 +54,26 @@ Live platform, dashboard, audit, map, tracking, offline-first, PWA. Status: done
 - Public pages (bilingual): active surveys/polls (one-response integrity per user), petition browse/sign, feedback submission with moderation, project tracker with status/timeline, needs-assessment summaries from AI analysis of reports.
 - Admin: create/manage surveys, polls, petitions, projects; moderate feedback; role-gated.
 
-### PHASE 4 — AI Intelligence & Analytics upgrade
+### PHASE 4 — AI Intelligence & Analytics upgrade (SHIPPED 2026-11-16)
+**Shipped:** intelligence briefs now ingest civic engagement signals (active polls + vote counts, open petitions with signature counts, pending feedback, top poll question) alongside report data — real AI, no simulation; the brief pipeline was verified generating a real 2,400-char weekly brief with the civic block present. Existing features (classification, similarity, thematic briefs, PDF/CSV export) unchanged.
+
+### PHASE 4 — AI Intelligence & Analytics upgrade (original plan)
 - Trend detection across reports + civic engagement data (recurring problems over time, ward heat ranking).
 - Community needs analysis combining reports, surveys, petitions.
 - Scheduled AI briefs already exist; extend to cover new data sources. Same rule: AI output labelled pending human review. Real API only (no simulation).
 
-### PHASE 5 — African Innovation Hub
+### PHASE 5 — African Innovation Hub (SHIPPED 2026-11-16)
+**Shipped:** /hub public page (innovation showcase + opportunities listings + submission form), /admin/hub (publish/hide innovation submissions, create opportunities with kind/deadline/provider/link validation, mark expired). Tables: innovations, opportunities. Submissions start pending — admin reviews before publication (anti-spam). Link validation rejects non-http(s) URLs. Platform starts empty — no fabricated listings.
+
+### PHASE 5 — African Innovation Hub (original plan)
 - Tables: `innovations`, `startups`, `opportunities` (grants/funding), `resources`.
 - Public showcase with admin-curated entries (submission → admin review → publish; protects against spam/fabrication).
 - Youth opportunities listings maintained by admins. No fabricated listings — empty until real entries exist.
 
-### PHASE 6 — Administration, security, testing, deployment
+### PHASE 6 — Administration, security, testing, deployment (EXECUTED 2026-11-16)
+**Security pass results:** swept every /api/admin/* endpoint for auth — found and fixed 2 unprotected endpoints (apiStats, apiWards now require staff auth); re-sweep clean. XSS render test: script-tag input stored but escaped on render (0 raw tags in HTML). RBAC verified: citizen blocked from all admin APIs (401), pending community_rep/government blocked at login (403). Rate limiting verified on register (5/h), feedback (5/h), reports (12/day). Full route matrix: 14 public pages + 7 admin pages + APIs all 200 through the public URL. Navigation redesigned to single-line with bilingual short labels (fixing overflow from the new modules). Remaining for later: email integration (password recovery, notifications) when Usman connects a provider.
+
+### PHASE 6 — Administration, security, testing, deployment (original plan)
 - Full RBAC matrix across all new modules.
 - Security pass: rate limits everywhere, input validation, session expiry, audit coverage of every mutation.
 - End-to-end test of every form and button; screenshot verification of every page through the public URL.

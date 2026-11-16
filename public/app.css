@@ -57,11 +57,14 @@ a:hover { text-decoration: underline; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none !important; }
 .brand-name { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.14rem; color: var(--green-900); letter-spacing: -.01em; }
 .brand-ai { color: var(--gold); margin-left: 3px; }
-.navlinks { display: flex; align-items: center; gap: 20px; font-weight: 500; font-size: .94rem; }
-.navlinks a { color: var(--ink); }
+.navlinks { display: flex; align-items: center; gap: 12px; font-weight: 500; font-size: .87rem; flex-wrap: nowrap; }
+.navlinks a { color: var(--ink); white-space: nowrap; }
+.navlinks a.nav-admin { font-size: .84rem; padding: 5px 11px; }
+.nav-row { gap: 14px; }
 .navlinks a.on { color: var(--green-700); font-weight: 700; }
 .navlinks a.nav-admin { color: var(--green-700); font-weight: 600; border: 1.5px solid var(--green-700); padding: 6px 14px; border-radius: 999px; }
 .navlinks a.nav-admin:hover { background: var(--green-700); color: #fff; text-decoration: none; }
+.navlinks a.nav-admin { font-size: .84rem; padding: 5px 11px; }
 .lang-switch { display: inline-flex; gap: 5px; align-items: center; font-weight: 600; color: var(--gold) !important; }
 .nav-burger { display: none; background: none; border: 1.5px solid var(--line); border-radius: 10px; padding: 7px 9px; color: var(--green-900); cursor: pointer; }
 

@@ -61,11 +61,11 @@ export function pageShell(opts: {
         <a href="/report" class="${active === 'report' ? 'on' : ''}">${t(lang, 'nav.report')}</a>
         <a href="/track" class="${active === 'track' ? 'on' : ''}">${t(lang, 'nav.track')}</a>
         <a href="/map" class="${active === 'map' ? 'on' : ''}">${t(lang, 'nav.map')}</a>
-        <a href="/about" class="${active === 'about' ? 'on' : ''}">${t(lang, 'nav.about')}</a>
+        <a href="/about" class="${active === 'about' ? 'on' : ''}">${t(lang, lang === 'ha' ? 'nav.about.nav' : 'nav.about')}</a>
         <a href="/civic" class="${active === 'civic' ? 'on' : ''}">${t(lang, 'nav.civic')}</a>
         <a href="/development" class="${active === 'dev' ? 'on' : ''}">${t(lang, 'nav.dev')}</a>
-        <a href="/register" class="${active === 'register' ? 'on' : ''}">${t(lang, 'auth.register.title')}</a>
-        <a href="/login" class="${active === 'login' ? 'on' : ''}">${t(lang, 'auth.login.title')}</a>
+        <a href="/hub" class="${active === 'hub' ? 'on' : ''}">${t(lang, 'nav.hub')}</a>
+        <a href="/login" class="${active === 'login' ? 'on' : ''}">${t(lang, 'nav.signin')}</a>
         <a href="/admin/login" class="nav-admin">${t(lang, 'nav.login')}</a>
         ${langSwitcher(lang, active === 'admin' ? '/admin' : `/${active ?? ''}`)}
       </nav>
@@ -88,6 +88,8 @@ export function pageShell(opts: {
       <div>
         <h4>${t(lang, 'nav.report')}</h4>
         <a href="/report">${t(lang, 'form.submit')}</a>
+        <a href="/register">${t(lang, 'auth.register.title')}</a>
+        <a href="/login">${t(lang, 'auth.login.title')}</a>
         <a href="/admin/login">${t(lang, 'nav.login')}</a>
       </div>
       <div>
@@ -109,7 +111,7 @@ export function pageShell(opts: {
 <meta name="description" content="AFRIPULSE AI \u2014 Africa's Living Intelligence & Innovation Network. ${t(lang, 'brand.tagline')}"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/assets/app.css?v=3"/>
+<link rel="stylesheet" href="/assets/app.css?v=5"/>
 <script src="/assets/app.js?v=3"></script>
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#0B3D2E"/>
