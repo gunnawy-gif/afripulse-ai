@@ -119,12 +119,14 @@ export async function aboutPage(req: import('node:http').IncomingMessage, res: i
   res.end(html);
 }
 
+// Verified: the 25 LGAs of Niger State (nigerianfocus.com LGA list, matching Niger State government sources).
+export const NIGER_LGAS = ['Agaie','Agwara','Bida','Borgu','Bosso','Chanchaga','Edati','Gbako','Gurara','Katcha','Kontagora','Lapai','Lavun','Magama','Mariga','Mashegu','Mokwa','Munya','Paikoro','Rafi','Rijau','Shiroro','Suleja','Tafa','Wushishi'] as const;
+
 export async function reportPage(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   const lang = langOf(req);
   const tr = tf(lang);
-  const wardOptions = (await many<{ name: string }>(`SELECT name FROM wards WHERE lga='Rafi' ORDER BY name`, []))
-    .map((w) => `<option value="${escapeHtml(w.name)}">${escapeHtml(w.name)}</option>`).join('');
   const catOptions = CATEGORIES.map((c) => `<option value="${c}">${escapeHtml(tr(`cat.${c}`))}</option>`).join('');
+  const lgaOptions = NIGER_LGAS.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
 
   const content = `
   <div class="page-head"><div class="wrap">
@@ -154,10 +156,12 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
             <select name="state" id="fstate"><option>Niger</option></select>
           </div>
           <div class="field"><label>${escapeHtml(tr('form.lga.label'))} *</label>
-            <select name="lga" id="flga"><option>Rafi</option></select>
+            <select name="lga" id="flga"><option value="" disabled selected>—</option>${lgaOptions}</select>
           </div>
           <div class="field"><label>${escapeHtml(tr('form.ward.label'))} *</label>
-            <select name="ward" required><option value="" disabled selected>—</option>${wardOptions}</select>
+            <select name="ward" id="fward" required disabled><option value="" disabled selected>—</option></select>
+            <input type="text" name="ward_free" id="fwardFree" maxlength="60" style="display:none" placeholder="${escapeHtml(tr('form.ward.freetext'))}"/>
+            <div class="hint" id="wardHint">${escapeHtml(tr('form.ward.hint'))}</div>
           </div>
         </div>
         <div class="frow">
@@ -218,6 +222,38 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
       });
     });
     var form = document.getElementById('reportForm');
+    // Dynamic ward loading per LGA (Niger State-wide platform)
+    var lgaSel = document.getElementById('flga');
+    var wardSel = document.getElementById('fward');
+    var wardFree = document.getElementById('fwardFree');
+    var wardHint = document.getElementById('wardHint');
+    lgaSel.addEventListener('change', function(){
+      var lga = lgaSel.value;
+      wardSel.required = true; wardSel.disabled = true; wardSel.innerHTML = '<option value="" disabled selected>—</option>';
+      wardFree.style.display = 'none'; wardFree.required = false; wardFree.value = '';
+      if (!lga) return;
+      getJson('/api/wards/' + encodeURIComponent(lga)).then(function(r){
+        var wards = (r.data && r.data.wards) || [];
+        if (wards.length) {
+          wardSel.innerHTML = '<option value="" disabled selected>—</option>' + wards.map(function(w){ return '<option value="' + w + '">' + w + '</option>'; }).join('');
+          wardSel.disabled = false;
+          wardHint.textContent = ${JSON.stringify(tr('form.ward.hint'))};
+        } else {
+          // No verified ward list for this LGA yet — free text, honest
+          wardSel.required = false; wardSel.style.display = 'none';
+          wardFree.style.display = 'block'; wardFree.required = true;
+          wardHint.textContent = ${JSON.stringify(tr('form.ward.hint.free'))};
+        }
+      }).catch(function(){});
+    });
+    // keep the submitted ward value consistent whichever control is visible
+    form.addEventListener('submit', function(){
+      if (wardFree.style.display !== 'none' && wardFree.value) {
+        var hidden = form.querySelector('input[name=ward_hidden]');
+        if (!hidden) { hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'ward_hidden'; form.appendChild(hidden); }
+        hidden.value = wardFree.value;
+      }
+    });
     var btn = document.getElementById('submitBtn');
     var btnHtml = btn.innerHTML;
     function showOfflineSuccess(pendingCode) {

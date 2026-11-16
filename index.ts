@@ -458,6 +458,8 @@ async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerRespon
       return;
     }
     bb.on('field', (name, val) => { fields[name] = val.slice(0, 6000); });
+    // NOTE: when the ward dropdown is hidden (LGA without verified ward list), the client
+    // sends ward_hidden; we merge it after parsing below.
     bb.on('file', (_name, stream, info) => {
       const mime = info.mimeType;
       if (!['image/png', 'image/jpeg'].includes(mime)) { stream.resume(); return; }
@@ -472,6 +474,9 @@ async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerRespon
     bb.on('finish', () => resolve());
     req.pipe(bb);
   }).catch((e) => { throw e; });
+
+  // merge free-text ward (sent as ward_hidden when the dropdown is unavailable for this LGA)
+  if (!fields.ward && fields.ward_hidden) fields.ward = fields.ward_hidden;
 
   const errors = validate(fields, {
     title: { required: true, min: 5, max: 150, label: 'Report title' },
@@ -491,9 +496,14 @@ async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerRespon
   const gps = fields.gps_text ? parseGps(fields.gps_text) : null;
   if (fields.gps_text && !gps) errors.gps_text = 'GPS coordinates are not valid (expected: latitude, longitude)';
 
-  // ward must exist for the LGA
-  const wardRow = await one<{ id: number }>('SELECT id FROM wards WHERE lga = $1 AND name = $2', [fields.lga, fields.ward]);
-  if (fields.lga && fields.ward && !wardRow) errors.ward = 'Unknown ward for this Local Government Area';
+  // ward: must match a verified ward IF the LGA has a seeded ward list; otherwise free text accepted (honest)
+  if (fields.lga && fields.ward) {
+    const wardCount = await one<{ n: string }>('SELECT count(*)::text n FROM wards WHERE lga = $1', [fields.lga]);
+    if (Number(wardCount?.n ?? 0) > 0) {
+      const wardRow = await one<{ id: number }>('SELECT id FROM wards WHERE lga = $1 AND name = $2', [fields.lga, fields.ward]);
+      if (!wardRow) errors.ward = 'Unknown ward for this Local Government Area';
+    }
+  }
 
   if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
 
@@ -1842,9 +1852,10 @@ async function apiGetIntelligence(req: http.IncomingMessage, res: http.ServerRes
 }
 
 async function apiWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const admin = await requireAdmin(req, res, 'view');
-  if (!admin) return;
-  const rows = await many<{ name: string }>("SELECT name FROM wards WHERE lga = 'Rafi' ORDER BY name");
+  await ensureSchema();
+  const lga = decodeURIComponent((req.url ?? '').replace(/^\/api\/wards\//, '').replace(/\?.*$/, ''));
+  if (!lga) { json(res, 400, { error: 'LGA required' }); return; }
+  const rows = await many<{ name: string }>('SELECT name FROM wards WHERE lga = $1 ORDER BY name', [sanitizeText(lga, 60)]);
   json(res, 200, { wards: rows.map((r) => r.name) });
 }
 
@@ -1930,6 +1941,7 @@ const routes: Route[] = [
   { method: 'PATCH', path: '/api/admin/reports/:id', handler: apiAdminUpdateReport },
   { method: 'POST', path: '/api/admin/reports/:id/comment', handler: apiAdminComment },
   { method: 'POST', path: '/api/admin/reports/:id/reanalyze', handler: apiAdminReanalyze },
+  { method: 'GET', path: '/api/wards/:lga', handler: apiWards },
   { method: 'GET', path: '/api/admin/wards', handler: apiWards },
   { method: 'POST', path: '/api/admin/intelligence/generate', handler: apiGenerateIntelligence },
   { method: 'GET', path: '/api/admin/intelligence/:id', handler: apiGetIntelligence },
