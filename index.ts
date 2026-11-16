@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import Busboy from 'busboy';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
@@ -10,13 +11,14 @@ import { tmpdir } from 'node:os';
 import { ensureSchema, one, many, sql } from './lib/db.ts';
 import {
   userFromRequest, userFromToken, verifyPassword, hashPassword, createSession,
-  sessionCookie, clearSessionCookie, destroySession, can, audit, clientIp, type SessionUser, type Role,
+  sessionCookie, clearSessionCookie, destroySession, can, audit, clientIp, STAFF_ROLES, type SessionUser, type Role,
 } from './lib/auth.ts';
-import { validate, ValidationError, sanitizeText, escapeHtml, CATEGORIES, STATUSES, PRIORITIES, ROLES, isValidPhone } from './lib/validate.ts';
+import { validate, ValidationError, sanitizeText, escapeHtml, CATEGORIES, STATUSES, PRIORITIES, ROLES, PUBLIC_ROLES, isValidPhone } from './lib/validate.ts';
 import { analyzeReport, findSimilarReports, generateIntelligenceBrief, generateThematicBrief, rateLimited, type IntelligenceStats } from './lib/ai.ts';
 import { t, tf, langFromCookie, LANGS, type Lang } from './lib/i18n.ts';
 import { pageShell, statusBadge, priorityBadge } from './lib/render.ts';
 import { homePage, aboutPage, reportPage, trackPage, mapPage } from './lib/pages.ts';
+import { registerPage, publicLoginPage, accountPage, isStaffRole } from './lib/account.ts';
 import { loginPage, adminHtml } from './lib/adminpages.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -93,6 +95,7 @@ function requireAdmin(req: http.IncomingMessage, res: http.ServerResponse, level
 // ---------- APIs ----------
 async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const ip = clientIp(req);
+  const submitter = await userFromRequest(req); // optional: logged-in citizens get reports linked to their account
   if (rateLimited('submit:' + ip, 12, 60 * 60 * 1000)) {
     json(res, 429, { error: 'Too many submissions from this device. Please try again later.' });
     return;
@@ -164,13 +167,14 @@ async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerRespon
 
   const ins = await one<{ id: number }>(
     `INSERT INTO reports (ref_no, title, description, category, state, lga, ward, community, specific_location,
-       latitude, longitude, coords_source, image_id, contact_name, contact_phone, language)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+       latitude, longitude, coords_source, image_id, contact_name, contact_phone, language, user_id, reporter_account)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
     [refNo, sanitizeText(fields.title, 150), sanitizeText(fields.description, 5000), fields.category,
      sanitizeText(fields.state, 40), sanitizeText(fields.lga, 60), sanitizeText(fields.ward, 60), sanitizeText(fields.community, 100),
      sanitizeText(fields.specific_location, 200), gps?.lat ?? null, gps?.lng ?? null, gps ? 'citizen_gps' : null,
      imageId, sanitizeText(fields.contact_name, 80) || null, sanitizeText(fields.contact_phone, 20) || null,
-     fields.language === 'ha' || fields.language === 'mixed' ? fields.language : 'en']
+     fields.language === 'ha' || fields.language === 'mixed' ? fields.language : 'en',
+     submitter ? submitter.id : null, submitter ? true : false]
   );
   const reportId = ins!.id;
   await sql.query('INSERT INTO status_history (report_id, new_status, note, changed_by) VALUES ($1,$2,$3,$4)',
@@ -302,6 +306,63 @@ function serveAsset(res: http.ServerResponse, file: string, mime: string, cacheC
 }
 
 // ---------- admin APIs ----------
+async function apiRegister(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const ip = clientIp(req);
+  if (rateLimited('register:' + ip, 5, 60 * 60 * 1000)) {
+    json(res, 429, { error: 'Too many registration attempts. Please try again later.' });
+    return;
+  }
+  const body = await readJson(req);
+  const errors = validate(body, {
+    name: { required: true, min: 2, max: 80, label: 'Full name' },
+    email: { required: true, max: 120, pattern: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, label: 'Email' },
+    password: { required: true, min: 8, max: 100, label: 'Password' },
+    role: { required: true, oneOf: [...PUBLIC_ROLES], label: 'Account type' },
+  });
+  if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
+  const email = sanitizeText(body.email, 120).toLowerCase();
+  const exists = await one<{ id: number }>('SELECT id FROM users WHERE email = $1', [email]);
+  if (exists) { json(res, 400, { error: 'A user with that email already exists' }); return; }
+  const role = String(body.role);
+  const active = role === 'citizen'; // community_rep / government need admin activation
+  const created = await one<{ id: number }>(
+    'INSERT INTO users (name, email, password_hash, role, active) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [sanitizeText(body.name, 80), email, hashPassword(String(body.password)), role, active]
+  );
+  await audit({ id: created!.id, name: sanitizeText(body.name, 80), email, role, lga: null }, 'user.register', 'user', String(created!.id), { role, self_registered: true }, ip);
+  json(res, 201, { ok: true, pendingApproval: !active });
+}
+
+async function apiAccountPassword(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const user = await userFromRequest(req);
+  if (!user) { json(res, 401, { error: 'Sign in first' }); return; }
+  if (rateLimited('pwchange:' + user.id, 5, 60 * 60 * 1000)) { json(res, 429, { error: 'Too many attempts. Wait a while.' }); return; }
+  const body = await readJson(req);
+  const password = String(body.password ?? '');
+  const current = String(body.current ?? '');
+  if (password.length < 8 || password.length > 100) { json(res, 400, { error: 'New password must be 8-100 characters' }); return; }
+  const row = await one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [user.id]);
+  if (!row || !verifyPassword(current, row.password_hash)) { json(res, 400, { error: 'Current password is not correct' }); return; }
+  await sql.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(password), user.id]);
+  await audit(user, 'user.password_change', 'user', String(user.id), null, clientIp(req));
+  json(res, 200, { ok: true });
+}
+
+async function apiAccountReports(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const user = await userFromRequest(req);
+  if (!user) { json(res, 401, { error: 'Sign in first' }); return; }
+  const rows = await many<{ ref_no: string; title: string; status: string; created_at: string }>(
+    'SELECT ref_no, title, status, created_at FROM reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100',
+    [user.id]
+  );
+  json(res, 200, {
+    reports: rows.map((r) => ({ ref_no: r.ref_no, title: escapeHtml(r.title), status: r.status, date: new Date(r.created_at).toISOString().slice(0, 10) })),
+  });
+}
+
 async function apiLogin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   await ensureSchema();
   const ip = clientIp(req);
@@ -316,14 +377,19 @@ async function apiLogin(req: http.IncomingMessage, res: http.ServerResponse): Pr
   const user = await one<{ id: number; name: string; email: string; password_hash: string; role: Role; lga: string | null; active: boolean }>(
     'SELECT * FROM users WHERE email = $1', [email]
   );
-  if (!user || !user.active || !verifyPassword(password, user.password_hash)) {
+  if (!user || !verifyPassword(password, user.password_hash)) {
     json(res, 401, { error: 'Invalid email or password' });
+    return;
+  }
+  if (!user.active) {
+    json(res, 403, { error: 'This account is not activated yet. Community Representative and Government accounts are reviewed by an administrator before activation.' });
     return;
   }
   const token = await createSession(user.id);
   await audit({ id: user.id, name: user.name, email: user.email, role: user.role, lga: user.lga }, 'login', 'session', null, null, ip);
+  const staff = STAFF_ROLES.includes(user.role as (typeof STAFF_ROLES)[number]);
   res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': sessionCookie(token) });
-  res.end(JSON.stringify({ ok: true }));
+  res.end(JSON.stringify({ ok: true, role: user.role, redirect: staff ? '/admin' : '/account' }));
 }
 
 async function apiLogout(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -718,6 +784,14 @@ async function apiAdminUsers(req: http.IncomingMessage, res: http.ServerResponse
     if (body.role && ROLES.includes(String(body.role) as (typeof ROLES)[number])) {
       await sql.query('UPDATE users SET role = $1 WHERE id = $2', [String(body.role), targetId]);
       await audit(user, 'user.role_change', 'user', String(targetId), { role: body.role }, clientIp(req));
+    }
+    if (body.reset_password === true) {
+      // Admin-generated temporary password, shown once, never stored in plain text.
+      const temp = 'AFR-' + crypto.randomBytes(6).toString('base64url');
+      await sql.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(temp), targetId]);
+      await audit(user, 'user.password_reset', 'user', String(targetId), null, clientIp(req));
+      json(res, 200, { ok: true, temporary_password: temp });
+      return;
     }
     json(res, 200, { ok: true });
   }
@@ -1121,6 +1195,9 @@ async function adminUsersPage(req: http.IncomingMessage, res: http.ServerRespons
           <option value="analyst">Data Analyst</option>
           <option value="lga_admin">Local Government Administrator</option>
           <option value="super_admin">Super Administrator</option>
+          <option value="citizen">Citizen</option>
+          <option value="community_rep">Community Representative</option>
+          <option value="government">Government / Institution</option>
         </select></div>
         <button class="btn btn-primary btn-sm" id="u-add">Create user</button>
         <div id="u-msg"></div>
@@ -1133,12 +1210,25 @@ async function adminUsersPage(req: http.IncomingMessage, res: http.ServerRespons
       getJson('/api/admin/users').then(function(r){
         document.getElementById('rows').innerHTML = (r.data.users || []).map(function(u){
           return '<tr><td><b>' + u.name + '</b></td><td>' + u.email + '</td><td>' + u.role + '</td><td>' + (u.lga || '—') + '</td>' +
-            '<td>' + (u.active ? '<span class="badge st-resolved">active</span>' : '<span class="badge st-rejected">disabled</span>') + '</td>' +
-            '<td>' + (u.id !== ${user.id} ? '<button data-id="' + u.id + '" data-active="' + u.active + '" class="btn btn-ghost btn-sm u-toggle">' + (u.active ? 'Disable' : 'Enable') + '</button>' : '<span class="muted small">you</span>') + '</td></tr>';
+            '<td>' + (u.active ? '<span class="badge st-resolved">active</span>' : '<span class="badge st-rejected">pending/disabled</span>') + '</td>' +
+            '<td>' + (u.id !== ${user.id} ? '<button data-id="' + u.id + '" data-active="' + u.active + '" class="btn btn-ghost btn-sm u-toggle">' + (u.active ? 'Disable' : 'Activate') + '</button> ' +
+              '<button data-id="' + u.id + '" class="btn btn-ghost btn-sm u-reset">Reset password</button>' : '<span class="muted small">you</span>') + '</td></tr>';
         }).join('');
         Array.prototype.forEach.call(document.querySelectorAll('.u-toggle'), function(b){
           b.onclick = function(){
             patchJson('/api/admin/users/' + b.dataset.id, { active: b.dataset.active !== 'true' }).then(load);
+          };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('.u-reset'), function(b){
+          b.onclick = function(){
+            if (!confirm('Generate a new temporary password for this user?')) return;
+            patchJson('/api/admin/users/' + b.dataset.id, { reset_password: true }).then(function(r){
+              if (r.ok && r.data.temporary_password) {
+                document.getElementById('u-msg').innerHTML = '<div class="notice notice-warn"><b>Temporary password (shown once):</b> <code>' + r.data.temporary_password + '</code><br>Give it to the user; they change it after signing in.</div>';
+              } else {
+                document.getElementById('u-msg').innerHTML = '<div class="notice notice-err">Reset failed.</div>';
+              }
+            });
           };
         });
       });
@@ -1178,6 +1268,17 @@ const routes: Route[] = [
   { method: 'GET', path: '/health', handler: (_q, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok'); } },
   { method: 'GET', path: '/', handler: homePage },
   { method: 'GET', path: '/about', handler: aboutPage },
+  { method: 'GET', path: '/register', handler: registerPage },
+  { method: 'GET', path: '/login', handler: publicLoginPage },
+  { method: 'GET', path: '/account', handler: (q, res) => {
+      userFromRequest(q).then((u) => {
+        if (!u) { res.writeHead(302, { location: '/login' }); res.end(); return; }
+        accountPage(q, res, u);
+      });
+    } },
+  { method: 'POST', path: '/api/register', handler: apiRegister },
+  { method: 'POST', path: '/api/account/password', handler: apiAccountPassword },
+  { method: 'GET', path: '/api/account/reports', handler: apiAccountReports },
   { method: 'GET', path: '/report', handler: reportPage },
   { method: 'GET', path: '/track', handler: trackPage },
   { method: 'GET', path: '/map', handler: mapPage },

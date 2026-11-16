@@ -59,6 +59,7 @@ export const CATEGORIES = [
 export const STATUSES = ['submitted', 'under_review', 'verified', 'assigned', 'in_progress', 'resolved', 'rejected'] as const;
 export const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 export const ROLES = ['super_admin', 'lga_admin', 'reviewer', 'analyst'] as const;
+export const PUBLIC_ROLES = ['citizen', 'community_rep', 'government'] as const;
 
 export function sanitizeText(value: unknown, max = 5000): string {
   return String(value ?? '')

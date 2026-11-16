@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import { sql, one } from './db.ts';
 
-export type Role = 'super_admin' | 'lga_admin' | 'reviewer' | 'analyst';
+export type Role = 'super_admin' | 'lga_admin' | 'reviewer' | 'analyst' | 'citizen' | 'community_rep' | 'government';
+
+export const STAFF_ROLES: Role[] = ['super_admin', 'lga_admin', 'reviewer', 'analyst'];
+export const PUBLIC_ROLES: Role[] = ['citizen', 'community_rep', 'government'];
 
 export type SessionUser = {
   id: number;
@@ -77,6 +80,7 @@ export async function destroySession(req: import('node:http').IncomingMessage): 
 }
 
 const ROLE_RANK: Record<Role, number> = {
+  citizen: 0, community_rep: 0, government: 0,
   analyst: 1, reviewer: 2, lga_admin: 3, super_admin: 4,
 };
 

@@ -124,3 +124,9 @@ CREATE INDEX IF NOT EXISTS idx_reports_created ON reports (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports (status);
 CREATE INDEX IF NOT EXISTS idx_reports_category ON reports (category);
 CREATE INDEX IF NOT EXISTS idx_reports_ward ON reports (ward);
+
+-- 2026-11-16 Phase 2: public user accounts (citizen, community_rep, government)
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','lga_admin','reviewer','analyst','citizen','community_rep','government'));
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reporter_account BOOLEAN NOT NULL DEFAULT FALSE;

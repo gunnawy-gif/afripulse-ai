@@ -62,6 +62,8 @@ export function pageShell(opts: {
         <a href="/track" class="${active === 'track' ? 'on' : ''}">${t(lang, 'nav.track')}</a>
         <a href="/map" class="${active === 'map' ? 'on' : ''}">${t(lang, 'nav.map')}</a>
         <a href="/about" class="${active === 'about' ? 'on' : ''}">${t(lang, 'nav.about')}</a>
+        <a href="/register" class="${active === 'register' ? 'on' : ''}">${t(lang, 'auth.register.title')}</a>
+        <a href="/login" class="${active === 'login' ? 'on' : ''}">${t(lang, 'auth.login.title')}</a>
         <a href="/admin/login" class="nav-admin">${t(lang, 'nav.login')}</a>
         ${langSwitcher(lang, active === 'admin' ? '/admin' : `/${active ?? ''}`)}
       </nav>
