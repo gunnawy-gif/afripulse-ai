@@ -1925,6 +1925,12 @@ const routes: Route[] = [
       else if (f === 'icon-512.png') serveAsset(res, 'icon-512.png', 'image/png');
       else { res.writeHead(404); res.end('Not found'); }
     } },
+  { method: 'GET', path: '/robots.txt', handler: (_q, res) => {
+      serveAsset(res, 'robots.txt', 'text/plain; charset=utf-8');
+    } },
+  { method: 'GET', path: '/sitemap.xml', handler: (_q, res) => {
+      serveAsset(res, 'sitemap.xml', 'application/xml; charset=utf-8');
+    } },
   { method: 'GET', path: '/sw.js', handler: (_q, res) => {
       serveAsset(res, 'sw.js', 'text/javascript; charset=utf-8', 'no-store');
     } },
@@ -1963,6 +1969,22 @@ const routes: Route[] = [
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Security headers on every response (set before any route writes head)
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()');
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://unpkg.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com",
+      "connect-src 'self' https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; '));
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathName = url.pathname;
     const method = req.method === 'HEAD' ? 'GET' : req.method ?? 'GET';
@@ -1984,6 +2006,24 @@ const server = http.createServer(async (req, res) => {
         await route.handler(req, res, {});
         return;
       }
+    }
+
+    if (method === 'GET' && !pathName.startsWith('/api/') && !pathName.startsWith('/assets/') && !pathName.startsWith('/admin')) {
+      const lang = langFromCookie(req);
+      const tr = tf(lang);
+      const notFound = pageShell({ lang, title: '404 — AFRIPULSE AI', active: '', content: `
+        <section class="band"><div class="wrap" style="text-align:center;max-width:560px">
+          <div style="font-size:64px">&#127760;</div>
+          <h1>404</h1>
+          <p class="muted">${escapeHtml(tr('err.404'))}</p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px">
+            <a class="btn btn-primary" href="/">${escapeHtml(t(lang, 'nav.home'))}</a>
+            <a class="btn btn-ghost" href="/report">${escapeHtml(t(lang, 'form.submit'))}</a>
+          </div>
+        </div></section>` });
+      res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(notFound);
+      return;
     }
 
     res.writeHead(404, { 'content-type': 'text/plain' });
