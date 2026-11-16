@@ -34,6 +34,18 @@ Planning and MVP Development.
 
 ---
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Home](docs/screenshots/home-full.png) | ![Report form (Hausa)](docs/screenshots/report-hausa.png) |
+| ![Map](docs/screenshots/map.png) | ![Admin dashboard](docs/screenshots/admin-dash4.png) |
+| ![Track a report](docs/screenshots/track2.png) | |
+
+## Technical Documentation
+
+See [docs/TECHNICAL-DOCUMENTATION.md](docs/TECHNICAL-DOCUMENTATION.md).
+
 ## Repository Structure
 
 - `index.ts` — webserver entry point (all routes)
