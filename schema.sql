@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS intelligence_reports (
   id SERIAL PRIMARY KEY,
   kind TEXT NOT NULL,             -- weekly | monthly | thematic

@@ -99,6 +99,7 @@ export function publicLoginPage(req: http.IncomingMessage, res: http.ServerRespo
       <div class="field"><label>${escapeHtml(tr('auth.password'))}</label><input type="password" name="password" required autocomplete="current-password"/></div>
       <div><button class="btn btn-primary" type="submit" id="logBtn">${icon('shield', 18)} ${escapeHtml(tr('auth.login.submit'))}</button></div>
       <div id="logErr"></div>
+      <p class="muted small"><a href="/forgot">${escapeHtml(tr('auth.forgot.link'))}</a></p>
       <p class="muted small">${escapeHtml(tr('auth.register.here'))} <a href="/register">${escapeHtml(tr('auth.register.title'))}</a> · <a href="/admin/login">${escapeHtml(tr('nav.login'))}</a></p>
     </form>
   </div></section>

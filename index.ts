@@ -19,6 +19,7 @@ import { t, tf, langFromCookie, LANGS, type Lang } from './lib/i18n.ts';
 import { pageShell, statusBadge, priorityBadge } from './lib/render.ts';
 import { homePage, aboutPage, reportPage, trackPage, mapPage } from './lib/pages.ts';
 import { registerPage, publicLoginPage, accountPage, isStaffRole } from './lib/account.ts';
+import { forgotPage, resetPage } from './lib/recovery.ts';
 import { civicPage, developmentPage } from './lib/civic.ts';
 import { hubPage } from './lib/hub.ts';
 import { loginPage, adminHtml } from './lib/adminpages.ts';
@@ -434,6 +435,72 @@ async function apiAdminHub(req: http.IncomingMessage, res: http.ServerResponse):
     }
     json(res, 200, { ok: true });
   }
+}
+
+// ---------- Password recovery (email link flow) ----------
+async function sendMail(to: string, subject: string, text: string): Promise<boolean> {
+  try {
+    const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { 'authorization': 'Bearer sentinel', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        raw: Buffer.from(
+          `To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${text}`
+        ).toString('base64url'),
+      }),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+const PUBLIC_BASE = 'https://blanket-at-usman-s-works-ezen0.skydive.app';
+
+async function apiForgot(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const ip = clientIp(req);
+  if (rateLimited('forgot:' + ip, 3, 60 * 60 * 1000)) { json(res, 429, { error: 'Too many attempts. Try again later.' }); return; }
+  const body = await readJson(req);
+  const email = sanitizeText(body.email, 120).toLowerCase();
+  if (!email) { json(res, 400, { error: 'Email required' }); return; }
+  const user = await one<{ id: number; name: string; email: string; active: boolean }>('SELECT id, name, email, active FROM users WHERE email = $1', [email]);
+  if (user && user.active) {
+    const token = crypto.randomBytes(32).toString('hex');
+    await sql.query("INSERT INTO password_resets (token, user_id, expires_at) VALUES ($1,$2, now() + interval '60 minutes')", [token, user.id]);
+    const lang: 'en' | 'ha' = email.includes('') ? 'en' : 'en';
+    const tr = tf(lang);
+    const ok = await sendMail(
+      user.email,
+      tr('auth.email.subject'),
+      `${tr('auth.email.hello')} ${user.name},\n\n${tr('auth.email.resetbody')}\n\n${PUBLIC_BASE}/reset?token=${token}\n\n${tr('auth.email.resetfoot')}\n\n${tr('auth.email.sign')}`
+    );
+    if (!ok) console.error('[webserver] reset email send failed for', user.email);
+    await audit({ id: user.id, name: user.name, email: user.email, role: 'citizen', lga: null }, 'user.forgot_request', 'user', String(user.id), null, ip);
+  }
+  // Neutral response regardless: never reveal whether the email exists
+  json(res, 200, { ok: true });
+}
+
+async function apiReset(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const ip = clientIp(req);
+  if (rateLimited('reset:' + ip, 5, 60 * 60 * 1000)) { json(res, 429, { error: 'Too many attempts. Try again later.' }); return; }
+  const body = await readJson(req);
+  const token = sanitizeText(body.token, 80);
+  const password = String(body.password ?? '');
+  if (password.length < 8 || password.length > 100) { json(res, 400, { error: 'Password must be 8-100 characters' }); return; }
+  const row = await one<{ token: string; user_id: number }>(
+    "SELECT token, user_id FROM password_resets WHERE token = $1 AND used = FALSE AND expires_at > now()", [token]
+  );
+  if (!row) { json(res, 400, { error: 'Invalid or expired reset link' }); return; }
+  await sql.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(password), row.user_id]);
+  await sql.query('UPDATE password_resets SET used = TRUE WHERE token = $1', [row.token]);
+  // Invalidate all existing sessions for this user (standard practice after reset)
+  await sql.query('DELETE FROM sessions WHERE user_id = $1', [row.user_id]);
+  const u = await one<{ id: number; name: string; email: string; role: string }>('SELECT id, name, email, role FROM users WHERE id = $1', [row.user_id]);
+  if (u) await audit({ id: u.id, name: u.name, email: u.email, role: u.role as Role, lga: null }, 'user.password_reset_self', 'user', String(u.id), null, ip);
+  json(res, 200, { ok: true });
 }
 
 // ---------- APIs ----------
@@ -1912,6 +1979,13 @@ const routes: Route[] = [
   { method: 'GET', path: '/track', handler: trackPage },
   { method: 'GET', path: '/map', handler: mapPage },
   { method: 'GET', path: '/lang/:code', handler: setLang },
+  { method: 'GET', path: '/forgot', handler: forgotPage },
+  { method: 'GET', path: '/reset', handler: (q, r) => {
+      const token = new URL(q.url ?? '/', 'http://localhost').searchParams.get('token') ?? '';
+      resetPage(q, r, token, token ? 'form' : 'invalid');
+    } },
+  { method: 'POST', path: '/api/forgot', handler: apiForgot },
+  { method: 'POST', path: '/api/reset', handler: apiReset },
   { method: 'POST', path: '/api/reports', handler: apiSubmitReport },
   { method: 'GET', path: '/api/track/:ref', handler: apiTrack },
   { method: 'GET', path: '/api/map/reports', handler: apiMapReports },
