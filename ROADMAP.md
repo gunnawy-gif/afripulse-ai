@@ -48,7 +48,8 @@ Live platform, dashboard, audit, map, tracking, offline-first, PWA. Status: done
 5. Password self-service recovery via email: **blocked on email integration** (no inbox connected). Interim: admin-assisted reset. Will complete when an email provider is connected.
 6. All screens bilingual (EN/HA), validated, rate-limited, audit-logged.
 
-### PHASE 3 — Civic Engagement + Community Development
+### PHASE 3 — Civic Engagement + Community Development (SHIPPED 2026-11-16)
+**Shipped and tested end-to-end:** /civic (bilingual polls with one-vote-per-device integrity via voter_key, petitions with signature counter + target progress bar, feedback/suggestions with admin moderation), /development (project cards with status badges + progress bars + update timelines), /admin/civic management (create polls/petitions/projects, add progress updates, close/reopen, publish/hide feedback). Tables: polls, poll_options, poll_votes, petitions, petition_signatures, feedback, projects, project_updates. All audit-logged and rate-limited where appropriate. No fabricated content: platform starts empty until Usman/admins add real entries.
 - Tables: `surveys`, `survey_questions`, `survey_responses`, `polls`, `poll_votes`, `petitions`, `petition_signatures`, `feedback`, `projects`, `project_updates`, `needs_assessments`.
 - Public pages (bilingual): active surveys/polls (one-response integrity per user), petition browse/sign, feedback submission with moderation, project tracker with status/timeline, needs-assessment summaries from AI analysis of reports.
 - Admin: create/manage surveys, polls, petitions, projects; moderate feedback; role-gated.

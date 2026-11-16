@@ -19,6 +19,7 @@ import { t, tf, langFromCookie, LANGS, type Lang } from './lib/i18n.ts';
 import { pageShell, statusBadge, priorityBadge } from './lib/render.ts';
 import { homePage, aboutPage, reportPage, trackPage, mapPage } from './lib/pages.ts';
 import { registerPage, publicLoginPage, accountPage, isStaffRole } from './lib/account.ts';
+import { civicPage, developmentPage } from './lib/civic.ts';
 import { loginPage, adminHtml } from './lib/adminpages.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,270 @@ function requireAdmin(req: http.IncomingMessage, res: http.ServerResponse, level
 
 // ---------- public pages ----------
 // (served below in the route table)
+
+// ---------- Phase 3: civic engagement & community development ----------
+function voterKey(req: http.IncomingMessage, user: SessionUser | null): string {
+  if (user) return 'u' + user.id;
+  return 'ip' + crypto.createHash('sha256').update(clientIp(req) + '|' + (req.headers['user-agent'] ?? '')).digest('hex').slice(0, 24);
+}
+
+async function civicData(req: http.IncomingMessage, user: SessionUser | null) {
+  const vk = voterKey(req, user);
+  const pollRows = await many<{ id: number; q_en: string; q_ha: string }>(
+    'SELECT id, question_en q_en, question_ha q_ha FROM polls WHERE active = TRUE ORDER BY created_at DESC LIMIT 6'
+  );
+  const polls = [];
+  for (const p of pollRows) {
+    const opts = await many<{ id: number; l_en: string; l_ha: string; votes: number }>(
+      `SELECT o.id, o.label_en l_en, o.label_ha l_ha, count(v.id)::int votes
+       FROM poll_options o LEFT JOIN poll_votes v ON v.option_id = o.id
+       WHERE o.poll_id = $1 GROUP BY o.id, o.label_en, o.label_ha, o.position ORDER BY o.position`,
+      [p.id]
+    );
+    const mine = await one<{ option_id: number }>('SELECT option_id FROM poll_votes WHERE poll_id = $1 AND voter_key = $2', [p.id, vk]);
+    polls.push({ id: p.id, q_en: p.q_en, q_ha: p.q_ha, options: opts, total: opts.reduce((s, o) => s + o.votes, 0), myVote: mine ? mine.option_id : null });
+  }
+  const petRows = await many<{ id: number; t_en: string; t_ha: string; b_en: string; b_ha: string; status: string; signature_target: number; sigs: number }>(
+    `SELECT p.id, p.title_en t_en, p.title_ha t_ha, p.body_en b_en, p.body_ha b_ha, p.status, p.signature_target,
+       count(s.id)::int sigs
+     FROM petitions p LEFT JOIN petition_signatures s ON s.petition_id = p.id
+     GROUP BY p.id ORDER BY p.created_at DESC LIMIT 6`
+  );
+  const signedRows = new Set(
+    (await many<{ petition_id: number }>('SELECT petition_id FROM petition_signatures WHERE voter_key = $1', [vk])).map((r) => r.petition_id)
+  );
+  const petitions = petRows.map((p) => ({ id: p.id, t_en: p.t_en, t_ha: p.t_ha, b_en: p.b_en, b_ha: p.b_ha, status: p.status, signatures: p.sigs, target: p.signature_target, signed: signedRows.has(p.id) }));
+  return { polls, petitions };
+}
+
+async function civicPageHandler(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const user = await userFromRequest(req);
+  const data = await civicData(req, user);
+  civicPage(req, res, data);
+}
+
+async function developmentPageHandler(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const rows = await many<{ id: number; name: string; description: string; ward: string | null; status: string; progress: number }>(
+    'SELECT id, name, description, ward, status, progress FROM projects ORDER BY created_at DESC LIMIT 50'
+  );
+  const projects = [];
+  for (const p of rows) {
+    const updates = await many<{ note: string; created_at: string }>(
+      'SELECT note, created_at FROM project_updates WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10',
+      [p.id]
+    );
+    projects.push({ ...p, updates });
+  }
+  developmentPage(req, res, projects);
+}
+
+async function apiPollVote(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const pollId = Number((req.url ?? '').match(/\/api\/polls\/(\d+)\/vote/)?.[1]);
+  if (!pollId) { json(res, 400, { error: 'Invalid poll' }); return; }
+  const body = await readJson(req);
+  const user = await userFromRequest(req);
+  const poll = await one<{ id: number }>('SELECT id FROM polls WHERE id = $1 AND active = TRUE', [pollId]);
+  if (!poll) { json(res, 404, { error: 'Poll not found or closed' }); return; }
+  const opt = await one<{ id: number; poll_id: number }>('SELECT id, poll_id FROM poll_options WHERE id = $1', [Number(body.option_id)]);
+  if (!opt || opt.poll_id !== pollId) { json(res, 400, { error: 'Invalid option' }); return; }
+  const vk = voterKey(req, user);
+  try {
+    await sql.query('INSERT INTO poll_votes (poll_id, option_id, voter_key) VALUES ($1,$2,$3)', [pollId, opt.id, vk]);
+  } catch {
+    json(res, 409, { error: 'You have already voted in this poll' });
+    return;
+  }
+  json(res, 200, { ok: true });
+}
+
+async function apiPetitionSign(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const petId = Number((req.url ?? '').match(/\/api\/petitions\/(\d+)\/sign/)?.[1]);
+  if (!petId) { json(res, 400, { error: 'Invalid petition' }); return; }
+  const body = await readJson(req);
+  const name = sanitizeText(body.name, 80);
+  if (!name || name.length < 2) { json(res, 400, { error: 'Your name is required to sign' }); return; }
+  const user = await userFromRequest(req);
+  const pet = await one<{ id: number; status: string }>('SELECT id, status FROM petitions WHERE id = $1', [petId]);
+  if (!pet) { json(res, 404, { error: 'Petition not found' }); return; }
+  if (pet.status !== 'open') { json(res, 400, { error: 'This petition is closed' }); return; }
+  const vk = voterKey(req, user);
+  try {
+    await sql.query('INSERT INTO petition_signatures (petition_id, name, voter_key) VALUES ($1,$2,$3)', [petId, name, vk]);
+  } catch {
+    json(res, 409, { error: 'You have already signed this petition' });
+    return;
+  }
+  json(res, 200, { ok: true });
+}
+
+async function apiFeedbackSubmit(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  await ensureSchema();
+  const ip = clientIp(req);
+  if (rateLimited('feedback:' + ip, 5, 60 * 60 * 1000)) { json(res, 429, { error: 'Too many messages. Please try again later.' }); return; }
+  const body = await readJson(req);
+  const name = sanitizeText(body.name, 80) || 'Anonymous';
+  const message = sanitizeText(body.message, 3000);
+  if (message.length < 5) { json(res, 400, { fields: { message: 'Message must be at least 5 characters' } }); return; }
+  const user = await userFromRequest(req);
+  await sql.query('INSERT INTO feedback (name, message, kind, user_id) VALUES ($1,$2,$3,$4)', [name, message, body.kind === 'suggestion' ? 'suggestion' : 'feedback', user ? user.id : null]);
+  json(res, 201, { ok: true });
+}
+
+// ---------- Phase 3 admin APIs ----------
+async function apiAdminPolls(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await requireAdmin(req, res, 'administer');
+  if (!user) return;
+  await ensureSchema();
+  if (req.method === 'GET') {
+    const rows = await many<Record<string, unknown>>(`SELECT p.id, p.question_en, p.question_ha, p.active, p.created_at,
+      (SELECT count(*) FROM poll_votes v WHERE v.poll_id = p.id)::int votes FROM polls p ORDER BY p.created_at DESC LIMIT 50`);
+    json(res, 200, { polls: rows });
+    return;
+  }
+  if (req.method === 'POST') {
+    const body = await readJson(req);
+    const q_en = sanitizeText(body.question_en, 300);
+    const q_ha = sanitizeText(body.question_ha, 300);
+    const options = Array.isArray(body.options) ? body.options.slice(0, 8) : [];
+    if (!q_en || !q_ha || options.length < 2) { json(res, 400, { error: 'Question (EN+HA) and at least two options are required' }); return; }
+    const poll = await one<{ id: number }>('INSERT INTO polls (question_en, question_ha, created_by) VALUES ($1,$2,$3) RETURNING id', [q_en, q_ha, user.id]);
+    let i = 0;
+    for (const o of options) {
+      await sql.query('INSERT INTO poll_options (poll_id, label_en, label_ha, position) VALUES ($1,$2,$3,$4)', [poll!.id, sanitizeText(o.label_en, 120), sanitizeText(o.label_ha ?? o.label_en, 120), i++]);
+    }
+    await audit(user, 'poll.create', 'poll', String(poll!.id), null, clientIp(req));
+    json(res, 201, { ok: true, id: poll!.id });
+    return;
+  }
+  if (req.method === 'PATCH') {
+    const body = await readJson(req);
+    const id = Number(new URL(req.url ?? '/', 'http://localhost').pathname.split('/').pop());
+    if (typeof body.active === 'boolean') {
+      await sql.query('UPDATE polls SET active = $1 WHERE id = $2', [body.active, id]);
+      await audit(user, body.active ? 'poll.open' : 'poll.close', 'poll', String(id), null, clientIp(req));
+    }
+    json(res, 200, { ok: true });
+  }
+}
+
+async function apiAdminPetitions(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await requireAdmin(req, res, 'administer');
+  if (!user) return;
+  await ensureSchema();
+  if (req.method === 'GET') {
+    const rows = await many<Record<string, unknown>>(`SELECT p.id, p.title_en, p.title_ha, p.status, p.signature_target, p.created_at,
+      (SELECT count(*) FROM petition_signatures s WHERE s.petition_id = p.id)::int signatures FROM petitions p ORDER BY p.created_at DESC LIMIT 50`);
+    json(res, 200, { petitions: rows });
+    return;
+  }
+  if (req.method === 'POST') {
+    const body = await readJson(req);
+    const errors = validate(body, {
+      title_en: { required: true, min: 5, max: 200, label: 'Title (English)' },
+      title_ha: { required: true, min: 5, max: 200, label: 'Title (Hausa)' },
+      body_en: { required: true, min: 20, max: 5000, label: 'Body (English)' },
+      body_ha: { required: true, min: 20, max: 5000, label: 'Body (Hausa)' },
+    });
+    if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
+    const pet = await one<{ id: number }>(
+      'INSERT INTO petitions (title_en, title_ha, body_en, body_ha, signature_target, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [sanitizeText(body.title_en, 200), sanitizeText(body.title_ha, 200), sanitizeText(body.body_en, 5000), sanitizeText(body.body_ha, 5000), Math.min(Math.max(Number(body.signature_target) || 100, 10), 100000), user.id]
+    );
+    await audit(user, 'petition.create', 'petition', String(pet!.id), null, clientIp(req));
+    json(res, 201, { ok: true, id: pet!.id });
+    return;
+  }
+  if (req.method === 'PATCH') {
+    const body = await readJson(req);
+    const id = Number(new URL(req.url ?? '/', 'http://localhost').pathname.split('/').pop());
+    if (body.status === 'open' || body.status === 'closed') {
+      await sql.query('UPDATE petitions SET status = $1 WHERE id = $2', [body.status, id]);
+      await audit(user, 'petition.status', 'petition', String(id), { status: body.status }, clientIp(req));
+    }
+    json(res, 200, { ok: true });
+  }
+}
+
+async function apiAdminFeedback(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await requireAdmin(req, res, 'review');
+  if (!user) return;
+  await ensureSchema();
+  if (req.method === 'GET') {
+    const rows = await many<Record<string, unknown>>('SELECT id, name, message, kind, status, created_at FROM feedback ORDER BY created_at DESC LIMIT 200');
+    json(res, 200, { feedback: rows });
+    return;
+  }
+  if (req.method === 'PATCH') {
+    const body = await readJson(req);
+    const id = Number(new URL(req.url ?? '/', 'http://localhost').pathname.split('/').pop());
+    if (body.status === 'published' || body.status === 'hidden' || body.status === 'pending') {
+      await sql.query('UPDATE feedback SET status = $1 WHERE id = $2', [body.status, id]);
+      await audit(user, 'feedback.' + body.status, 'feedback', String(id), null, clientIp(req));
+    }
+    json(res, 200, { ok: true });
+  }
+}
+
+async function apiAdminProjects(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await requireAdmin(req, res, 'administer');
+  if (!user) return;
+  await ensureSchema();
+  const pathId = Number((req.url ?? '').match(/\/api\/admin\/projects\/(\d+)/)?.[1]);
+  const isUpdates = (req.url ?? '').includes('/updates');
+  if (req.method === 'GET') {
+    const rows = await many<Record<string, unknown>>(`SELECT p.id, p.name, p.description, p.ward, p.status, p.progress, p.created_at,
+      (SELECT count(*) FROM project_updates u WHERE u.project_id = p.id)::int updates FROM projects p ORDER BY p.created_at DESC LIMIT 50`);
+    json(res, 200, { projects: rows });
+    return;
+  }
+  if (req.method === 'POST' && isUpdates) {
+    const body = await readJson(req);
+    const note = sanitizeText(body.note, 1000);
+    if (note.length < 3) { json(res, 400, { error: 'Update note is required' }); return; }
+    const proj = await one<{ id: number }>('SELECT id FROM projects WHERE id = $1', [pathId]);
+    if (!proj) { json(res, 404, { error: 'Project not found' }); return; }
+    await sql.query('INSERT INTO project_updates (project_id, note) VALUES ($1,$2)', [pathId, note]);
+    await sql.query('UPDATE projects SET updated_at = now() WHERE id = $1', [pathId]);
+    await audit(user, 'project.update', 'project', String(pathId), null, clientIp(req));
+    json(res, 201, { ok: true });
+    return;
+  }
+  if (req.method === 'POST') {
+    const body = await readJson(req);
+    const errors = validate(body, {
+      name: { required: true, min: 3, max: 150, label: 'Project name' },
+      description: { required: true, min: 10, max: 5000, label: 'Description' },
+    });
+    if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
+    const status = ['planning', 'ongoing', 'completed', 'suspended'].includes(String(body.status)) ? String(body.status) : 'planning';
+    const progress = Math.min(Math.max(Number(body.progress) || 0, 0), 100);
+    const proj = await one<{ id: number }>(
+      'INSERT INTO projects (name, description, ward, status, progress, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [sanitizeText(body.name, 150), sanitizeText(body.description, 5000), body.ward ? sanitizeText(body.ward, 60) : null, status, progress, user.id]
+    );
+    await audit(user, 'project.create', 'project', String(proj!.id), null, clientIp(req));
+    json(res, 201, { ok: true, id: proj!.id });
+    return;
+  }
+  if (req.method === 'PATCH') {
+    const body = await readJson(req);
+    const proj = await one<{ id: number }>('SELECT id FROM projects WHERE id = $1', [pathId]);
+    if (!proj) { json(res, 404, { error: 'Project not found' }); return; }
+    if (['planning', 'ongoing', 'completed', 'suspended'].includes(String(body.status))) {
+      await sql.query('UPDATE projects SET status = $1 WHERE id = $2', [String(body.status), pathId]);
+    }
+    if (body.progress !== undefined) {
+      await sql.query('UPDATE projects SET progress = $1 WHERE id = $2', [Math.min(Math.max(Number(body.progress) || 0, 0), 100), pathId]);
+    }
+    await sql.query('UPDATE projects SET updated_at = now() WHERE id = $1', [pathId]);
+    await audit(user, 'project.edit', 'project', String(pathId), null, clientIp(req));
+    json(res, 200, { ok: true });
+  }
+}
 
 // ---------- APIs ----------
 async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -1175,6 +1440,156 @@ async function adminAuditPage(req: http.IncomingMessage, res: http.ServerRespons
   res.end(html);
 }
 
+async function adminCivicPage(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const user = await userFromRequest(req);
+  if (!user || !(user.role === 'super_admin' || user.role === 'lga_admin')) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
+  const content = `
+  <div class="dash-grid" style="grid-template-columns: 1fr 1fr">
+    <div class="card">
+      <h3>Polls</h3>
+      <div class="stack" style="max-width:none">
+        <input id="p-qen" type="text" placeholder="Question (English)"/>
+        <input id="p-qha" type="text" placeholder="Question (Hausa)"/>
+        <input id="p-o1en" type="text" placeholder="Option 1 (English)"/>
+        <input id="p-o1ha" type="text" placeholder="Option 1 (Hausa)"/>
+        <input id="p-o2en" type="text" placeholder="Option 2 (English)"/>
+        <input id="p-o2ha" type="text" placeholder="Option 2 (Hausa)"/>
+        <input id="p-o3en" type="text" placeholder="Option 3 (English, optional)"/>
+        <input id="p-o3ha" type="text" placeholder="Option 3 (Hausa, optional)"/>
+        <button class="btn btn-primary btn-sm" id="p-add">Create poll</button>
+      </div>
+      <div class="tablewrap" style="margin-top:14px"><table class="tbl"><thead><tr><th>Question</th><th>Votes</th><th></th></tr></thead><tbody id="p-rows"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Petitions</h3>
+      <div class="stack" style="max-width:none">
+        <input id="t-ten" type="text" placeholder="Title (English)"/>
+        <input id="t-tha" type="text" placeholder="Title (Hausa)"/>
+        <textarea id="t-ben" rows="2" placeholder="Body (English)"></textarea>
+        <textarea id="t-bha" rows="2" placeholder="Body (Hausa)"></textarea>
+        <input id="t-target" type="number" min="10" value="100" placeholder="Signature target"/>
+        <button class="btn btn-primary btn-sm" id="t-add">Create petition</button>
+      </div>
+      <div class="tablewrap" style="margin-top:14px"><table class="tbl"><thead><tr><th>Title</th><th>Sigs</th><th></th></tr></thead><tbody id="t-rows"></tbody></table></div>
+    </div>
+  </div>
+  <div class="dash-grid" style="grid-template-columns: 1fr 1fr; margin-top:20px">
+    <div class="card">
+      <h3>Community projects</h3>
+      <div class="stack" style="max-width:none">
+        <input id="j-name" type="text" placeholder="Project name"/>
+        <input id="j-ward" type="text" placeholder="Ward (optional)"/>
+        <textarea id="j-desc" rows="2" placeholder="Description"></textarea>
+        <div style="display:flex;gap:10px">
+          <select id="j-status" style="flex:1"><option value="planning">Planning</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option><option value="suspended">Suspended</option></select>
+          <input id="j-progress" type="number" min="0" max="100" value="0" style="width:110px" placeholder="Progress %"/>
+        </div>
+        <button class="btn btn-primary btn-sm" id="j-add">Create project</button>
+      </div>
+      <div class="tablewrap" style="margin-top:14px"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody id="j-rows"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Feedback moderation</h3>
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>From</th><th>Message</th><th>Status</th><th></th></tr></thead><tbody id="f-rows"></tbody></table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px" id="proj-update-box" style="display:none">
+    <h3>Add progress update</h3>
+    <div class="stack" style="max-width:none">
+      <input type="hidden" id="pu-id"/>
+      <span class="muted small" id="pu-name"></span>
+      <textarea id="pu-note" rows="2" placeholder="Update note (what changed on this project)"></textarea>
+      <button class="btn btn-primary btn-sm" id="pu-add">Add update</button>
+      <button class="btn btn-ghost btn-sm" id="pu-cancel">Cancel</button>
+    </div>
+  </div>
+  <script>
+  (function(){
+    var E = function(id){ return document.getElementById(id); };
+    function loadPolls(){
+      getJson('/api/admin/polls').then(function(r){
+        E('p-rows').innerHTML = (r.data.polls||[]).map(function(p){
+          return '<tr><td>' + p.question_en + '</td><td>' + p.votes + '</td><td><button class="btn btn-ghost btn-sm p-toggle" data-id="' + p.id + '" data-active="' + p.active + '">' + (p.active ? 'Close' : 'Reopen') + '</button></td></tr>';
+        }).join('');
+        Array.prototype.forEach.call(document.querySelectorAll('.p-toggle'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/polls/' + b.dataset.id, { active: b.dataset.active !== 'true' }).then(loadPolls); };
+        });
+      });
+    }
+    E('p-add').onclick = function(){
+      var options = [];
+      [[E('p-o1en'),E('p-o1ha')],[E('p-o2en'),E('p-o2ha')],[E('p-o3en'),E('p-o3ha')]].forEach(function(pair){
+        if (pair[0].value.trim()) options.push({ label_en: pair[0].value.trim(), label_ha: pair[1].value.trim() || pair[0].value.trim() });
+      });
+      postJson('/api/admin/polls', { question_en: E('p-qen').value, question_ha: E('p-qha').value, options: options }).then(function(r){
+        E('p-qen').value = E('p-qha').value = E('p-o1en').value = E('p-o1ha').value = E('p-o2en').value = E('p-o2ha').value = E('p-o3en').value = E('p-o3ha').value = '';
+        if (!r.ok) alert((r.data && r.data.error) || 'Failed'); loadPolls();
+      });
+    };
+    function loadPetitions(){
+      getJson('/api/admin/petitions').then(function(r){
+        E('t-rows').innerHTML = (r.data.petitions||[]).map(function(p){
+          return '<tr><td>' + p.title_en + '</td><td>' + p.signatures + '/' + p.signature_target + '</td><td><button class="btn btn-ghost btn-sm t-toggle" data-id="' + p.id + '" data-status="' + p.status + '">' + (p.status === 'open' ? 'Close' : 'Reopen') + '</button></td></tr>';
+        }).join('');
+        Array.prototype.forEach.call(document.querySelectorAll('.t-toggle'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/petitions/' + b.dataset.id, { status: b.dataset.status === 'open' ? 'closed' : 'open' }).then(loadPetitions); };
+        });
+      });
+    }
+    E('t-add').onclick = function(){
+      postJson('/api/admin/petitions', { title_en: E('t-ten').value, title_ha: E('t-tha').value, body_en: E('t-ben').value, body_ha: E('t-bha').value, signature_target: Number(E('t-target').value) }).then(function(r){
+        if (!r.ok) alert((r.data && (r.data.error || JSON.stringify(r.data.fields))) || 'Failed'); else { E('t-ten').value = E('t-tha').value = E('t-ben').value = E('t-bha').value = ''; }
+        loadPetitions();
+      });
+    };
+    function loadProjects(){
+      getJson('/api/admin/projects').then(function(r){
+        E('j-rows').innerHTML = (r.data.projects||[]).map(function(p){
+          return '<tr><td>' + p.name + '</td><td>' + p.status + '</td><td>' + p.progress + '%</td>' +
+            '<td><button class="btn btn-ghost btn-sm j-upd" data-id="' + p.id + '" data-name="' + p.name.replace(/"/g,'') + '">Update</button> ' +
+            '<button class="btn btn-ghost btn-sm j-done" data-id="' + p.id + '">Complete</button></td></tr>';
+        }).join('');
+        Array.prototype.forEach.call(document.querySelectorAll('.j-upd'), function(b){
+          b.onclick = function(){ E('proj-update-box').style.display = 'block'; E('pu-id').value = b.dataset.id; E('pu-name').textContent = b.dataset.name; E('pu-note').value=''; window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('.j-done'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/projects/' + b.dataset.id, { status: 'completed', progress: 100 }).then(loadProjects); };
+        });
+      });
+    }
+    E('j-add').onclick = function(){
+      postJson('/api/admin/projects', { name: E('j-name').value, description: E('j-desc').value, ward: E('j-ward').value, status: E('j-status').value, progress: Number(E('j-progress').value) }).then(function(r){
+        if (!r.ok) alert((r.data && (r.data.error || JSON.stringify(r.data.fields))) || 'Failed'); else { E('j-name').value = E('j-desc').value = E('j-ward').value = ''; }
+        loadProjects();
+      });
+    };
+    E('pu-add').onclick = function(){
+      postJson('/api/admin/projects/' + E('pu-id').value + '/updates', { note: E('pu-note').value }).then(function(r){
+        if (!r.ok) alert((r.data && r.data.error) || 'Failed');
+        E('proj-update-box').style.display = 'none'; loadProjects();
+      });
+    };
+    E('pu-cancel').onclick = function(){ E('proj-update-box').style.display = 'none'; };
+    function loadFeedback(){
+      getJson('/api/admin/feedback').then(function(r){
+        E('f-rows').innerHTML = (r.data.feedback||[]).map(function(f){
+          return '<tr><td>' + f.name + '</td><td>' + f.message.slice(0,80) + '</td><td>' + f.status + '</td>' +
+            '<td>' + (f.status !== 'published' ? '<button class="btn btn-ghost btn-sm f-set" data-id="' + f.id + '" data-status="published">Publish</button> ' : '') +
+            (f.status !== 'hidden' ? '<button class="btn btn-ghost btn-sm f-set" data-id="' + f.id + '" data-status="hidden">Hide</button>' : '') + '</td></tr>';
+        }).join('');
+        Array.prototype.forEach.call(document.querySelectorAll('.f-set'), function(b){
+          b.onclick = function(){ patchJson('/api/admin/feedback/' + b.dataset.id, { status: b.dataset.status }).then(loadFeedback); };
+        });
+      });
+    }
+    loadPolls(); loadPetitions(); loadProjects(); loadFeedback();
+  })();
+  <\/script>`;
+  const html = adminHtml(user, 'civic', 'Civic & Development', content);
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(html);
+}
+
 async function adminUsersPage(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const user = await userFromRequest(req);
   if (!user || user.role !== 'super_admin') { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
@@ -1279,6 +1694,24 @@ const routes: Route[] = [
   { method: 'POST', path: '/api/register', handler: apiRegister },
   { method: 'POST', path: '/api/account/password', handler: apiAccountPassword },
   { method: 'GET', path: '/api/account/reports', handler: apiAccountReports },
+  { method: 'GET', path: '/civic', handler: civicPageHandler },
+  { method: 'GET', path: '/development', handler: developmentPageHandler },
+  { method: 'POST', path: '/api/polls/:id/vote', handler: apiPollVote },
+  { method: 'POST', path: '/api/petitions/:id/sign', handler: apiPetitionSign },
+  { method: 'POST', path: '/api/feedback', handler: apiFeedbackSubmit },
+  { method: 'GET', path: '/api/admin/polls', handler: apiAdminPolls },
+  { method: 'POST', path: '/api/admin/polls', handler: apiAdminPolls },
+  { method: 'PATCH', path: '/api/admin/polls/:id', handler: apiAdminPolls },
+  { method: 'GET', path: '/api/admin/petitions', handler: apiAdminPetitions },
+  { method: 'POST', path: '/api/admin/petitions', handler: apiAdminPetitions },
+  { method: 'PATCH', path: '/api/admin/petitions/:id', handler: apiAdminPetitions },
+  { method: 'GET', path: '/api/admin/feedback', handler: apiAdminFeedback },
+  { method: 'PATCH', path: '/api/admin/feedback/:id', handler: apiAdminFeedback },
+  { method: 'GET', path: '/api/admin/projects', handler: apiAdminProjects },
+  { method: 'POST', path: '/api/admin/projects', handler: apiAdminProjects },
+  { method: 'PATCH', path: '/api/admin/projects/:id', handler: apiAdminProjects },
+  { method: 'POST', path: '/api/admin/projects/:id/updates', handler: apiAdminProjects },
+  { method: 'GET', path: '/admin/civic', handler: adminCivicPage },
   { method: 'GET', path: '/report', handler: reportPage },
   { method: 'GET', path: '/track', handler: trackPage },
   { method: 'GET', path: '/map', handler: mapPage },

@@ -321,3 +321,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .9rem; }
   border: 1px solid #f0d48a; border-radius: 999px;
   padding: 4px 14px; font-size: 0.85rem; font-weight: 600;
 }
+
+/* ---- Civic & development (Phase 3) ---- */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+.progress { height: 10px; background: var(--green-50, #eef4f0); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin: 8px 0; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #0B3D2E, #C9A227); border-radius: 999px; transition: width .4s; }
+.poll-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 6px 0; cursor: pointer; }
+.poll-row.mine { border-color: var(--ok); background: var(--ok-soft, #eafaf0); }
+.poll-row input[type=radio] { accent-color: var(--ok); }

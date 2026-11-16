@@ -130,3 +130,73 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','lga_admin','reviewer','analyst','citizen','community_rep','government'));
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id);
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS reporter_account BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 2026-11-16 Phase 3: Civic engagement + community development
+CREATE TABLE IF NOT EXISTS polls (
+  id SERIAL PRIMARY KEY,
+  question_en TEXT NOT NULL,
+  question_ha TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS poll_options (
+  id SERIAL PRIMARY KEY,
+  poll_id INTEGER NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  label_en TEXT NOT NULL,
+  label_ha TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+  id SERIAL PRIMARY KEY,
+  poll_id INTEGER NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  option_id INTEGER NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+  voter_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (poll_id, voter_key)
+);
+CREATE TABLE IF NOT EXISTS petitions (
+  id SERIAL PRIMARY KEY,
+  title_en TEXT NOT NULL,
+  title_ha TEXT NOT NULL,
+  body_en TEXT NOT NULL,
+  body_ha TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  signature_target INTEGER NOT NULL DEFAULT 100,
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS petition_signatures (
+  id SERIAL PRIMARY KEY,
+  petition_id INTEGER NOT NULL REFERENCES petitions(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  voter_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (petition_id, voter_key)
+);
+CREATE TABLE IF NOT EXISTS feedback (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  message TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'feedback' CHECK (kind IN ('feedback','suggestion')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','published','hidden')),
+  user_id INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS projects (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  ward TEXT,
+  status TEXT NOT NULL DEFAULT 'planning' CHECK (status IN ('planning','ongoing','completed','suspended')),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS project_updates (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
