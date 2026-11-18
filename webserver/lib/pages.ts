@@ -10,15 +10,26 @@ function langOf(req: import('node:http').IncomingMessage): Lang {
 export async function publicStats() {
   // Includes clearly-flagged demonstration data so the pilot homepage shows a
   // live-looking picture; the admin queue still tags DEMO rows explicitly.
-  const row = await one<{ total: string; resolved: string; communities: string; ai: string }>(
+  // Neon free-tier cold starts intermittently 502; retry a few times before
+  // degrading to zeros so the homepage shows real numbers on the retry hit.
+  const query =
     `SELECT count(*)::text total,
             count(*) FILTER (WHERE status='resolved')::text resolved,
             count(DISTINCT COALESCE(community, ward, lga))::text communities,
             count(*) FILTER (WHERE ai_assessed_at IS NOT NULL)::text ai
-     FROM reports`
-  );
-  const n = (s: string | undefined) => Number(s ?? 0);
-  return { total: n(row?.total), resolved: n(row?.resolved), communities: n(row?.communities), ai: n(row?.ai) };
+     FROM reports`;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const row = await one<{ total: string; resolved: string; communities: string; ai: string }>(query);
+      const n = (s: string | undefined) => Number(s ?? 0);
+      return { total: n(row?.total), resolved: n(row?.resolved), communities: n(row?.communities), ai: n(row?.ai) };
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('publicStats failed');
 }
 
 export async function homePage(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
@@ -396,6 +407,7 @@ export async function trackPage(req: import('node:http').IncomingMessage, res: i
           '<dt>${escapeHtml(t('en','track.location'))}</dt><dd>' + rp.location_label + '</dd>' +
           '<dt>${escapeHtml(t('en','track.submitted'))}</dt><dd>' + rp.created_at + '</dd>' +
           '</dl>' +
+          (rp.is_demo ? '<div class="notice notice-warn" style="margin-top:12px"><b>Demonstration data:</b> this reference was created during platform testing, not by a citizen. It is kept for demonstration only.</div>' : '') +
           (rp.rejection_reason ? '<div class="notice notice-err" style="margin-top:12px"><b>Rejected:</b> ' + rp.rejection_reason + '</div>' : '') +
           '</div>' +
           '<div class="card" style="margin-top:18px"><h3>${escapeHtml(t('en','track.history'))}</h3><ul class="timeline">' + hist + '</ul></div>';
