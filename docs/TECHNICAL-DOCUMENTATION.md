@@ -156,3 +156,14 @@ webserver/
     app.css           # AFRIPULSE design system
     app.js            # Client helpers (GPS, fetch, toasts, language, nav)
 ```
+
+
+## 13. National expansion (2026-11-18)
+
+The geographic database now covers **all of Nigeria**: 37 states (36 + FCT), all 774 Local Government Areas, and 8,700+ wards — sourced from Open Admin Data (openadmindata.org, CC-BY-4.0), seeded in batched idempotent inserts (`webserver/seed-geography.ts`, dataset `webserver/data/nigeria-geo.json`).
+
+- Report form: full **State → LGA → Ward** cascading dropdowns (all verified data; no free-text wards needed anywhere since every LGA has a seeded ward list).
+- Community map: national OpenStreetMap view with State and LGA filters; zooms to the pilot region when Niger is selected.
+- Admin reports queue: filter by State and LGA.
+- The community pilot remains anchored in Rafi LGA (its 11 wards independently verified from two Nigerian sources). Note: Open Admin Data spells one Rafi ward "Kushirki South"; we keep the eduweb/nigeria2 spelling "Kusherki South" and seed it from the verified pilot list.
+- Data source citation is included in the repo (`CITATION` note in the dataset header) per CC-BY-4.0.
