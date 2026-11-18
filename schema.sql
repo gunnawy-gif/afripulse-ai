@@ -8,6 +8,13 @@ CREATE TABLE IF NOT EXISTS wards (
   UNIQUE (state, lga, name)
 );
 
+CREATE TABLE IF NOT EXISTS lgas (
+  id SERIAL PRIMARY KEY,
+  state TEXT NOT NULL,
+  name TEXT NOT NULL,
+  UNIQUE (state, name)
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,

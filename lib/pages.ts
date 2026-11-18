@@ -107,7 +107,7 @@ export async function aboutPage(req: import('node:http').IncomingMessage, res: i
       <p style="max-width:70ch;font-size:1.05rem">${escapeHtml(tr('about.body'))}</p>
       <div class="grid g3" style="margin-top:34px">
         <div class="card"><h3>${icon('check', 20)} Mission</h3><p>Connect citizens, communities, institutions and government through AI so local challenges are seen, understood and addressed.</p></div>
-        <div class="card"><h3>${icon('map', 20)} Vision</h3><p>A scalable African community-intelligence network, beginning in Rafi LGA and growing across Niger State and beyond.</p></div>
+        <div class="card"><h3>${icon('map', 20)} Vision</h3><p>A scalable African community-intelligence network, beginning in Rafi LGA and growing across Nigeria and beyond.</p></div>
         <div class="card"><h3>${icon('shield', 20)} Principles</h3><p>Human oversight of every AI assessment, verified locations only, and privacy-conscious handling of citizen data.</p></div>
       </div>
       <div class="card" style="margin-top:24px"><h3>${icon('users', 20)} ${escapeHtml(tr('contact.title'))}</h3><p>${escapeHtml(tr('contact.body'))}</p>
@@ -126,6 +126,11 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
   const lang = langOf(req);
   const tr = tf(lang);
   const catOptions = CATEGORIES.map((c) => `<option value="${c}">${escapeHtml(tr(`cat.${c}`))}</option>`).join('');
+  // National geography: all states from the verified seed; Niger preselected as pilot state
+  const stateRows = await many<{ state: string }>('SELECT DISTINCT state FROM lgas ORDER BY state', []);
+  const stateOptions = stateRows
+    .map((s) => `<option value="${escapeHtml(s.state)}"${s.state === 'Niger' ? ' selected' : ''}>${escapeHtml(s.state)}</option>`)
+    .join('');
   const lgaOptions = NIGER_LGAS.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
 
   const content = `
@@ -153,7 +158,7 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
         </div>
         <div class="frow3">
           <div class="field"><label>${escapeHtml(tr('form.state.label'))} *</label>
-            <select name="state" id="fstate"><option>Niger</option></select>
+            <select name="state" id="fstate">${stateOptions}</select>
           </div>
           <div class="field"><label>${escapeHtml(tr('form.lga.label'))} *</label>
             <select name="lga" id="flga"><option value="" disabled selected>—</option>${lgaOptions}</select>
@@ -222,17 +227,31 @@ export async function reportPage(req: import('node:http').IncomingMessage, res: 
       });
     });
     var form = document.getElementById('reportForm');
-    // Dynamic ward loading per LGA (Niger State-wide platform)
+    // National geographic cascade: state → LGA → ward (verified data only)
+    var stateSel = document.getElementById('fstate');
     var lgaSel = document.getElementById('flga');
     var wardSel = document.getElementById('fward');
     var wardFree = document.getElementById('fwardFree');
     var wardHint = document.getElementById('wardHint');
+    function loadLgas() {
+      var state = stateSel.value;
+      lgaSel.innerHTML = '<option value="" disabled selected>—</option>';
+      wardSel.required = true; wardSel.disabled = true; wardSel.innerHTML = '<option value="" disabled selected>—</option>';
+      wardFree.style.display = 'none'; wardFree.required = false; wardFree.value = '';
+      if (!state) return;
+      getJson('/api/geo/lgas?state=' + encodeURIComponent(state)).then(function(r){
+        var lgas = (r.data && r.data.lgas) || [];
+        lgaSel.innerHTML = '<option value="" disabled selected>—</option>' + lgas.map(function(l){ return '<option value="' + l + '">' + l + '</option>'; }).join('');
+      });
+    }
+    stateSel.addEventListener('change', loadLgas);
     lgaSel.addEventListener('change', function(){
+      var state = stateSel.value;
       var lga = lgaSel.value;
       wardSel.required = true; wardSel.disabled = true; wardSel.innerHTML = '<option value="" disabled selected>—</option>';
       wardFree.style.display = 'none'; wardFree.required = false; wardFree.value = '';
       if (!lga) return;
-      getJson('/api/wards/' + encodeURIComponent(lga)).then(function(r){
+      getJson('/api/geo/wards?state=' + encodeURIComponent(state) + '&lga=' + encodeURIComponent(lga)).then(function(r){
         var wards = (r.data && r.data.wards) || [];
         if (wards.length) {
           wardSel.innerHTML = '<option value="" disabled selected>—</option>' + wards.map(function(w){ return '<option value="' + w + '">' + w + '</option>'; }).join('');
@@ -404,12 +423,12 @@ export async function mapPage(req: import('node:http').IncomingMessage, res: imp
       <div class="filterbar" id="mapFilters">
         <div><label>${escapeHtml(tr('form.category.label'))}</label><select id="mf-cat"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
           ${CATEGORIES.map((c) => `<option value="${c}">${escapeHtml(tr(`cat.${c}`))}</option>`).join('')}</select></div>
-        <div><label>${escapeHtml(t('en','track.priority'))}</label><select id="mf-pri"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
+        <div><label>${escapeHtml(tr('track.priority'))}</label><select id="mf-pri"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
           ${['critical','high','medium','low'].map((p) => `<option value="${p}">${escapeHtml(tr(`priority.${p}`))}</option>`).join('')}</select></div>
-        <div><label>${escapeHtml(t('en','track.status'))}</label><select id="mf-st"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
+        <div><label>${escapeHtml(tr('track.status'))}</label><select id="mf-st"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
           ${['submitted','under_review','verified','assigned','in_progress','resolved','rejected'].map((s) => `<option value="${s}">${escapeHtml(tr(`status.${s}`))}</option>`).join('')}</select></div>
-        <div><label>${escapeHtml(tr('form.ward.label'))}</label><select id="mf-ward"><option value="">${escapeHtml(tr('map.filter.all'))}</option>
-          ${(await many<{ name: string }>(`SELECT name FROM wards WHERE lga='Rafi' ORDER BY name`, [])).map((w) => `<option>${escapeHtml(w.name)}</option>`).join('')}</select></div>
+        <div><label>${escapeHtml(tr('form.state.label'))}</label><select id="mf-state"><option value="">${escapeHtml(tr('map.filter.all'))}</option></select></div>
+        <div><label>${escapeHtml(tr('form.lga.label'))}</label><select id="mf-lga"><option value="">${escapeHtml(tr('map.filter.all'))}</option></select></div>
       </div>
       <div id="map"></div>
       <p class="muted small" style="margin-top:10px">${escapeHtml(tr('map.disclaimer'))}</p>
@@ -421,17 +440,37 @@ export async function mapPage(req: import('node:http').IncomingMessage, res: imp
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
   <script>
   (function(){
-    var map = L.map('map').setView([9.93, 6.08], 10);
+    var map = L.map('map').setView([9.08, 8.68], 5.6);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
     var markers = [];
+    // national filters: state -> LGA cascade
+    getJson('/api/geo/states').then(function(r){
+      var sel = document.getElementById('mf-state');
+      (r.data.states || []).forEach(function(s){ var o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+    });
+    document.getElementById('mf-state').addEventListener('change', function(){
+      var sel = document.getElementById('mf-lga');
+      sel.innerHTML = '<option value="">${escapeHtml(tr('map.filter.all'))}</option>';
+      var state = document.getElementById('mf-state').value;
+      if (state) {
+        getJson('/api/geo/lgas?state=' + encodeURIComponent(state)).then(function(r){
+          (r.data.lgas || []).forEach(function(l){ var o = document.createElement('option'); o.value = l; o.textContent = l; sel.appendChild(o); });
+        });
+        map.setView([9.3, 5.5], 7); // Niger pilot region focus
+      } else {
+        map.setView([9.08, 8.68], 5.6);
+      }
+      load();
+    });
     function load() {
       var p = new URLSearchParams({
         category: document.getElementById('mf-cat').value,
         priority: document.getElementById('mf-pri').value,
         status: document.getElementById('mf-st').value,
-        ward: document.getElementById('mf-ward').value
+        state: document.getElementById('mf-state').value,
+        lga: document.getElementById('mf-lga').value
       });
       getJson('/api/map/reports?' + p.toString()).then(function(r){
         markers.forEach(function(m){ map.removeLayer(m); }); markers = [];
@@ -450,7 +489,7 @@ export async function mapPage(req: import('node:http').IncomingMessage, res: imp
         });
       });
     }
-    ['mf-cat','mf-pri','mf-st','mf-ward'].forEach(function(id){ document.getElementById(id).addEventListener('change', load); });
+    ['mf-cat','mf-pri','mf-st','mf-lga'].forEach(function(id){ document.getElementById(id).addEventListener('change', load); });
     load();
   })();
   </script>`;

@@ -56,7 +56,7 @@ const en: Dict = {
   'cta.title': 'Seen a challenge in your community?',
   'cta.body': 'Report it in English or Hausa. It takes two minutes, and you get a reference number to track it.',
   'about.title': 'About AFRIPULSE AI',
-  'about.body': 'AFRIPULSE AI is an independent civic-technology initiative founded by Usman Musa, serving Niger State, Nigeria. Our mission is to connect citizens, communities, institutions and government through artificial intelligence \u2014 so that local challenges become visible, understood and addressed. The platform covers all 25 Local Government Areas of Niger State (274 verified wards), with the community pilot anchored in Rafi LGA.',
+  'about.body': 'AFRIPULSE AI is an independent civic-technology initiative founded by Usman Musa, serving communities across Nigeria. Our mission is to connect citizens, communities, institutions and government through artificial intelligence \u2014 so that local challenges become visible, understood and addressed. The platform\u2019s geographic database covers all 36 states and the FCT (774 Local Government Areas, 8,700+ verified wards), with the community pilot anchored in Rafi LGA, Niger State.',
   'contact.title': 'Contact',
   'contact.body': 'For partnerships, institutional enquiries or community sensitisation visits, reach the project office in Kagara, Rafi LGA, or email gunnawy@gmail.com.',
   'form.title': 'Report a Community Issue',
@@ -295,7 +295,7 @@ const ha: Dict = {
   'cta.title': 'Kana da matsala a al\u2019ummarka?',
   'cta.body': 'Rika rahoton da Turanci ko Hausa. Ba ya daukar minti biyu, kuma zaka sami lambar tabbatarwa.',
   'about.title': 'Game da AFRIPULSE AI',
-  'about.body': 'AFRIPULSE AI aiki ne mai zaman kansa na fasahar al\u2019umma wanda Usman Musa ya kaddamar, yana hidimar Jihar Neja, Najeriya. Manufarmu ita ce ha\u00f0a ha\u00f0aka \u2019yan kasa, al\u2019ummomi, kungiyoyi da gwamnati ta hanyar fasahar hankali \u2014 domin matsalolin gida su bayyana, su fahimce su kuma a magance su. Platform din ya rika kananan hukumomi 25 duka na Jihar Neja (unguwanni 274 tabbatacciyar), inda gwajin al\u2019umma take da tushe a Karamar Hukumar Rafi.',
+  'about.body': 'AFRIPULSE AI aiki ne mai zaman kansa na fasahar al\u2019umma wanda Usman Musa ya kaddamar, yana hidimar al\u2019ummomi a fadin Najeriya. Manufarmu ita ce ha\u00f0a ha\u00f0aka \u2019yan kasa, al\u2019ummomi, kungiyoyi da gwamnati ta hanyar fasahar hankali \u2014 domin matsalolin gida su bayyana, su fahimce su kuma a magance su. Bayanan wurare na platform din sun rika jihohi 36 da babban birnin tarayya (kananan hukumomi 774, unguwanni 8,700+ tabbatacciyan), inda gwajin al\u2019umma take da tushe a Karamar Hukumar Rafi, Jihar Neja.',
 
   'contact.title': 'Tuntuba',
   'contact.body': 'Don ha\u00f0in gwiwa, tambayoyin kungiyoyi ko ziyarar wayar da kan al\u2019umma, tuntubi ofishin aiki a Kagara, Karamar Hukumar Rafi, ko imel: gunnawy@gmail.com.',

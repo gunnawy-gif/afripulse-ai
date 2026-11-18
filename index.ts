@@ -563,13 +563,11 @@ async function apiSubmitReport(req: http.IncomingMessage, res: http.ServerRespon
   const gps = fields.gps_text ? parseGps(fields.gps_text) : null;
   if (fields.gps_text && !gps) errors.gps_text = 'GPS coordinates are not valid (expected: latitude, longitude)';
 
-  // ward: must match a verified ward IF the LGA has a seeded ward list; otherwise free text accepted (honest)
-  if (fields.lga && fields.ward) {
-    const wardCount = await one<{ n: string }>('SELECT count(*)::text n FROM wards WHERE lga = $1', [fields.lga]);
-    if (Number(wardCount?.n ?? 0) > 0) {
-      const wardRow = await one<{ id: number }>('SELECT id FROM wards WHERE lga = $1 AND name = $2', [fields.lga, fields.ward]);
-      if (!wardRow) errors.ward = 'Unknown ward for this Local Government Area';
-    }
+  // ward: must match a verified ward for the chosen state + LGA (all 774 LGAs are seeded)
+  if (fields.state && fields.lga && fields.ward) {
+    const wardRow = await one<{ id: number }>('SELECT id FROM wards WHERE state = $1 AND lga = $2 AND name = $3',
+      [fields.state, fields.lga, fields.ward]);
+    if (!wardRow) errors.ward = 'Unknown ward for this Local Government Area';
   }
 
   if (Object.keys(errors).length) { json(res, 400, { fields: errors }); return; }
@@ -681,11 +679,13 @@ async function apiMapReports(req: http.IncomingMessage, res: http.ServerResponse
   const cat = url.searchParams.get('category');
   const pri = url.searchParams.get('priority');
   const st = url.searchParams.get('status');
-  const ward = url.searchParams.get('ward');
+  const state = url.searchParams.get('state');
+  const lga = url.searchParams.get('lga');
   if (cat && CATEGORIES.includes(cat as (typeof CATEGORIES)[number])) { params.push(cat); filters.push(`category = $${params.length}`); }
   if (pri && PRIORITIES.includes(pri as (typeof PRIORITIES)[number])) { params.push(pri); filters.push(`priority = $${params.length}`); }
   if (st && STATUSES.includes(st as (typeof STATUSES)[number])) { params.push(st); filters.push(`status = $${params.length}`); }
-  if (ward) { params.push(sanitizeText(ward, 60)); filters.push(`ward = $${params.length}`); }
+  if (state) { params.push(sanitizeText(state, 40)); filters.push(`state = $${params.length}`); }
+  if (lga) { params.push(sanitizeText(lga, 60)); filters.push(`lga = $${params.length}`); }
   const rows = await many<Record<string, unknown>>(
     `SELECT ref_no, title, category, priority, status, ward, latitude, longitude FROM reports
      WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT 500`, params
@@ -865,7 +865,8 @@ async function apiAdminReports(req: http.IncomingMessage, res: http.ServerRespon
   eq('status', 'status', STATUSES);
   eq('category', 'category', CATEGORIES);
   eq('priority', 'priority', PRIORITIES);
-  eq('ward', 'ward');
+  eq('state', 'state');
+  eq('lga', 'lga');
   const q = url.searchParams.get('q');
   if (q) {
     params.push(`%${sanitizeText(q, 80)}%`);
@@ -1341,7 +1342,8 @@ async function adminReportsPage(req: http.IncomingMessage, res: http.ServerRespo
     <div><label>Status</label><select id="f-status"><option value="">All</option>${STATUSES.map((s) => `<option value="${s}">${ST_LABEL[s][0]}</option>`).join('')}</select></div>
     <div><label>Category</label><select id="f-cat"><option value="">All</option>${CATEGORIES.map((c) => `<option value="${c}">${CAT_LABEL[c][0]}</option>`).join('')}</select></div>
     <div><label>Priority</label><select id="f-pri"><option value="">All</option>${PRIORITIES.map((p) => `<option value="${p}">${PR_LABEL[p][0]}</option>`).join('')}</select></div>
-    <div><label>Ward</label><select id="f-ward"><option value="">All</option></select></div>
+    <div><label>State</label><select id="f-state"><option value="">All</option></select></div>
+    <div><label>LGA</label><select id="f-lga"><option value="">All</option></select></div>
     <div><button class="btn btn-primary btn-sm" id="f-apply">Apply</button></div>
   </div>
   <div class="tablewrap"><table class="tbl"><thead><tr>
@@ -1355,7 +1357,7 @@ async function adminReportsPage(req: http.IncomingMessage, res: http.ServerRespo
       var p = new URLSearchParams({
         q: document.getElementById('f-q').value, status: document.getElementById('f-status').value,
         category: document.getElementById('f-cat').value, priority: document.getElementById('f-pri').value,
-        ward: document.getElementById('f-ward').value, page: page
+        state: document.getElementById('f-state').value, lga: document.getElementById('f-lga').value, page: page
       });
       getJson('/api/admin/reports?' + p.toString()).then(function(r){
         var rows = document.getElementById('rows');
@@ -1378,9 +1380,19 @@ async function adminReportsPage(req: http.IncomingMessage, res: http.ServerRespo
         });
       });
     }
-    getJson('/api/admin/wards').then(function(r){
-      var sel = document.getElementById('f-ward');
-      (r.data.wards || []).forEach(function(w){ var o = document.createElement('option'); o.value = w; o.textContent = w; sel.appendChild(o); });
+    // National filters: states + state-dependent LGAs
+    getJson('/api/geo/states').then(function(r){
+      var sel = document.getElementById('f-state');
+      (r.data.states || []).forEach(function(s){ var o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+    });
+    document.getElementById('f-state').addEventListener('change', function(){
+      var sel = document.getElementById('f-lga');
+      sel.innerHTML = '<option value="">All</option>';
+      var state = document.getElementById('f-state').value;
+      if (!state) return;
+      getJson('/api/geo/lgas?state=' + encodeURIComponent(state)).then(function(r){
+        (r.data.lgas || []).forEach(function(l){ var o = document.createElement('option'); o.value = l; o.textContent = l; sel.appendChild(o); });
+      });
     });
     document.getElementById('f-apply').onclick = function(){ page = 1; load(); };
     load();
@@ -1918,20 +1930,26 @@ async function apiGetIntelligence(req: http.IncomingMessage, res: http.ServerRes
   json(res, 200, ir);
 }
 
-async function apiWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  await ensureSchema();
-  const lga = decodeURIComponent((req.url ?? '').replace(/^\/api\/wards\//, '').replace(/\?.*$/, ''));
-  if (!lga) { json(res, 400, { error: 'LGA required' }); return; }
-  const rows = await many<{ name: string }>('SELECT name FROM wards WHERE lga = $1 ORDER BY name', [sanitizeText(lga, 60)]);
-  json(res, 200, { wards: rows.map((r) => r.name) });
+async function apiGeoStates(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const states = await many<{ state: string }>('SELECT DISTINCT state FROM lgas ORDER BY state', []);
+  json(res, 200, { states: states.map((r) => r.state) });
 }
 
-// Admin-scoped ward listing (auth required); the public one is /api/wards/:lga
-async function apiAdminWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const admin = await requireAdmin(req, res, 'view');
-  if (!admin) return;
-  const rows = await many<{ lga: string; name: string }>("SELECT lga, name FROM wards WHERE state = 'Niger' ORDER BY lga, name");
-  json(res, 200, { wards: rows });
+async function apiGeoLgas(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const state = sanitizeText(url.searchParams.get('state') ?? '', 40);
+  if (!state) { json(res, 200, { lgas: [] }); return; }
+  const rows = await many<{ name: string }>('SELECT name FROM lgas WHERE state = $1 ORDER BY name', [state]);
+  json(res, 200, { lgas: rows.map((r) => r.name) });
+}
+
+async function apiGeoWards(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const state = sanitizeText(url.searchParams.get('state') ?? '', 40);
+  const lga = sanitizeText(url.searchParams.get('lga') ?? '', 60);
+  if (!state || !lga) { json(res, 200, { wards: [] }); return; }
+  const rows = await many<{ name: string }>('SELECT name FROM wards WHERE state = $1 AND lga = $2 ORDER BY name', [state, lga]);
+  json(res, 200, { wards: rows.map((r) => r.name) });
 }
 
 // ---------- route table ----------
@@ -1989,6 +2007,9 @@ const routes: Route[] = [
   { method: 'POST', path: '/api/reports', handler: apiSubmitReport },
   { method: 'GET', path: '/api/track/:ref', handler: apiTrack },
   { method: 'GET', path: '/api/map/reports', handler: apiMapReports },
+  { method: 'GET', path: '/api/geo/states', handler: apiGeoStates },
+  { method: 'GET', path: '/api/geo/lgas', handler: apiGeoLgas },
+  { method: 'GET', path: '/api/geo/wards', handler: apiGeoWards },
   { method: 'GET', path: '/api/image/:id', handler: serveImage },
   { method: 'GET', path: '/assets/:file', handler: (_q, res, p) => {
       const f = p.file;
@@ -2029,8 +2050,6 @@ const routes: Route[] = [
   { method: 'PATCH', path: '/api/admin/reports/:id', handler: apiAdminUpdateReport },
   { method: 'POST', path: '/api/admin/reports/:id/comment', handler: apiAdminComment },
   { method: 'POST', path: '/api/admin/reports/:id/reanalyze', handler: apiAdminReanalyze },
-  { method: 'GET', path: '/api/wards/:lga', handler: apiWards },
-  { method: 'GET', path: '/api/admin/wards', handler: apiAdminWards },
   { method: 'POST', path: '/api/admin/intelligence/generate', handler: apiGenerateIntelligence },
   { method: 'GET', path: '/api/admin/intelligence/:id', handler: apiGetIntelligence },
   { method: 'GET', path: '/api/admin/export.csv', handler: apiExportCsv },
