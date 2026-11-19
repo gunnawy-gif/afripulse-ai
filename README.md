@@ -18,8 +18,11 @@ To transform community challenges into actionable insights and intelligent solut
 - Development Monitoring
 - Multilingual AI Assistance
 
+## Coverage
+Geographic data covers all 36 Nigerian states plus the FCT (774 Local Government Areas, 8,700+ verified wards — sourced from Open Admin Data, CC-BY-4.0).
+
 ## Pilot Location
-Rafi LGA, Niger State, Nigeria.
+Rafi LGA, Niger State, Nigeria (community pilot).
 
 ## Founder
 Usman Musa (Al-Gunnawy)
