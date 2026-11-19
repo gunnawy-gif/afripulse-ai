@@ -407,7 +407,7 @@ export async function trackPage(req: import('node:http').IncomingMessage, res: i
           '<dt>${escapeHtml(t('en','track.location'))}</dt><dd>' + rp.location_label + '</dd>' +
           '<dt>${escapeHtml(t('en','track.submitted'))}</dt><dd>' + rp.created_at + '</dd>' +
           '</dl>' +
-          (rp.is_demo ? '<div class="notice notice-warn" style="margin-top:12px"><b>Demonstration data:</b> this reference was created during platform testing, not by a citizen. It is kept for demonstration only.</div>' : '') +
+          (rp.is_demo ? '<div class="notice notice-warn" style="margin-top:12px">' + ${JSON.stringify(tr('track.demo'))} + '</div>' : '') +
           (rp.rejection_reason ? '<div class="notice notice-err" style="margin-top:12px"><b>Rejected:</b> ' + rp.rejection_reason + '</div>' : '') +
           '</div>' +
           '<div class="card" style="margin-top:18px"><h3>${escapeHtml(t('en','track.history'))}</h3><ul class="timeline">' + hist + '</ul></div>';
